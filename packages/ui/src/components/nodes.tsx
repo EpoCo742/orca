@@ -59,10 +59,11 @@ export function LoopNode({ data, selected }: NodeProps<OrcaRFNode>) {
     <div className={`orca-node orca-loop cat-control ${statusClass(data.status)} ${selected ? 'selected' : ''}`}>
       <NodeResizer minWidth={320} minHeight={160} isVisible={selected} lineClassName="resizer-line" handleClassName="resizer-handle" />
       <div className="node-header">
-        <span className="node-icon">↻</span>
+        <span className="node-icon">{data.container === 'map' ? '⫶' : '↻'}</span>
         <span className="node-title">{data.label}</span>
         {data.hasError && <span className="badge badge-error">!</span>}
         {data.iteration !== undefined && <span className="badge badge-info">iteration {data.iteration + 1}</span>}
+        {data.progress && <span className="badge badge-info">{data.progress}</span>}
         {data.status && <span className={`status-dot ${statusClass(data.status)}`} title={data.status} />}
       </div>
       <div className="node-subtitle">{data.subtitle}</div>
@@ -78,7 +79,7 @@ export function LoopNode({ data, selected }: NodeProps<OrcaRFNode>) {
           ))}
         </div>
       </div>
-      <div className="loop-body-hint">body: nodes dropped inside run once per iteration</div>
+      <div className="loop-body-hint">{data.container === 'map' ? 'body: runs once per item (item, index)' : 'body: nodes dropped inside run once per iteration'}</div>
     </div>
   );
 }

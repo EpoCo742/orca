@@ -8,16 +8,23 @@ import type { AgentAdapter, AdapterId } from '../adapters/types.js';
 import type { RunStore } from './store.js';
 import type { WorktreeManager } from './worktrees.js';
 import type { Logger } from '../logger.js';
+import type { SecretsProvider } from '../secrets/provider.js';
+import type { RunManager } from './manager.js';
+import type { WorkflowStore } from '../workflows/store.js';
 
 export interface EngineServices {
   store: RunStore;
   sandbox: ExpressionSandbox;
   approvals: ApprovalBroker;
   worktrees: WorktreeManager;
+  secrets: SecretsProvider;
   adapters: Partial<Record<AdapterId, AgentAdapter>>;
   logger: Logger;
   /** Global cap on concurrently running agent sessions across all runs. */
   agentSlots: { max: number; used: number };
+  /** Set after construction; used by sub-workflow nodes. */
+  runs?: RunManager;
+  workflows?: WorkflowStore;
 }
 
 export interface ExecResult {
@@ -39,6 +46,8 @@ export class NodeExecError extends Error {
 export interface ExecContext<C = unknown> {
   runId: string;
   workflow: WorkflowDocument;
+  workflowPath: string;
+  projection: RunProjection;
   plan: ExecutionPlan;
   node: PlannedNode;
   scope: string;
@@ -93,21 +102,29 @@ export function buildExprContext(args: {
     if (st.scope === '' || st.scope === scope || scope.startsWith(st.scope + '/')) nodes[st.nodeId] = st.outputs;
   }
   let iteration: ExprContext['iteration'];
+  let item: unknown;
+  let index: number | undefined;
   if (scope) {
     const segs = scope.split('/');
     const last = segs[segs.length - 1]!;
     const m = /^([a-z][a-z0-9_]*)\[(\d+)\]$/.exec(last);
     if (m) {
-      const loopId = m[1]!;
-      const index = Number(m[2]);
+      const containerId = m[1]!;
+      const i = Number(m[2]);
       const parentScope = segs.slice(0, -1).join('/');
-      const prevScope = parentScope ? `${parentScope}/${loopId}[${index - 1}]` : `${loopId}[${index - 1}]`;
-      let previous: Record<string, Record<string, unknown>> | undefined;
-      if (index > 0) {
-        previous = {};
-        for (const st of Object.values(proj.nodes)) if (st.scope === prevScope && st.status === 'completed' && st.outputs) previous[st.nodeId] = st.outputs;
+      const items = proj.mapItems[nodeKey(containerId, parentScope)];
+      if (items) {
+        item = items[i];
+        index = i;
+      } else {
+        const prevScope = parentScope ? `${parentScope}/${containerId}[${i - 1}]` : `${containerId}[${i - 1}]`;
+        let previous: Record<string, Record<string, unknown>> | undefined;
+        if (i > 0) {
+          previous = {};
+          for (const st of Object.values(proj.nodes)) if (st.scope === prevScope && st.status === 'completed' && st.outputs) previous[st.nodeId] = st.outputs;
+        }
+        iteration = { index: i, previous };
       }
-      iteration = { index, previous };
     }
   }
   const inputs: Record<string, unknown> = {};
@@ -116,6 +133,8 @@ export function buildExprContext(args: {
   return {
     inputs,
     nodes,
+    item,
+    index,
     iteration,
     run: { id: proj.id, startedAt: args.startedAt, workflow: { id: workflow.id, name: workflow.name } },
     env: args.env,

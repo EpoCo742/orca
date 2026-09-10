@@ -1,5 +1,6 @@
-import type { AgentCopilotConfig, ToolPermissionRequest } from '@orca/shared';
+import type { AgentCopilotConfig, McpServerConfig, ToolPermissionRequest } from '@orca/shared';
 import { NodeExecError, type ExecContext, type ExecResult, type NodeExecutor } from '../context.js';
+import { resolveDeep } from '../../secrets/resolve.js';
 import { evaluatePolicy, parseRules, rememberRuleFor, type PermissionQuery } from '../../adapters/permissions.js';
 import type { AdapterHooks, AgentRunSpec, PermissionDecision } from '../../adapters/types.js';
 
@@ -12,7 +13,14 @@ export const agentExecutor: NodeExecutor<AgentCopilotConfig> = {
     if (!adapter) throw new NodeExecError(`agent adapter "${cfg.adapter}" is not available`);
     const settings = ctx.workflow.settings;
     const nodeId = ctx.node.node.id;
+    const mcpServers: Record<string, McpServerConfig> = {};
+    for (const name of cfg.mcpServers) {
+      const server = settings.mcpServers[name];
+      if (!server) throw new NodeExecError(`MCP server "${name}" is not defined in workflow settings`);
+      mcpServers[name] = resolveDeep(server, ctx.services.secrets, { cwd: ctx.cwd });
+    }
     const spec: AgentRunSpec = {
+      mcpServers,
       prompt: cfg.prompt,
       system: cfg.system,
       model: cfg.model ?? settings.defaultModel,

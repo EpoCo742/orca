@@ -4,6 +4,9 @@ import { conditionExecutor, manualTriggerExecutor, shellExecutor, transformExecu
 import { gitExecutor } from './git.js';
 import { gateExecutor } from './gate.js';
 import { notifyExecutor } from './notify.js';
+import { joinExecutor } from './join.js';
+import { subWorkflowExecutor } from './sub.js';
+import { mcpToolExecutor } from './mcp_tool.js';
 
 export function defaultExecutors(): Map<string, NodeExecutor> {
   const list: NodeExecutor[] = [
@@ -15,6 +18,9 @@ export function defaultExecutors(): Map<string, NodeExecutor> {
     gitExecutor as NodeExecutor,
     gateExecutor as NodeExecutor,
     notifyExecutor as NodeExecutor,
+    joinExecutor as NodeExecutor,
+    subWorkflowExecutor as NodeExecutor,
+    mcpToolExecutor as NodeExecutor,
   ];
   return new Map(list.map((e) => [e.type, e]));
 }

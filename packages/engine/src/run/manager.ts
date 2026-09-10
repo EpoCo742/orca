@@ -19,13 +19,19 @@ export class RunManager {
     return this.startFromDocument(detail.document, detail.path, args.inputs, args.trigger ?? { type: 'manual' });
   }
 
-  async startFromDocument(workflow: WorkflowDocument, workflowPath: string, inputs: Record<string, unknown>, trigger: { type: string; nodeId?: string }): Promise<{ runId: string }> {
+  async startFromDocument(
+    workflow: WorkflowDocument,
+    workflowPath: string,
+    inputs: Record<string, unknown>,
+    trigger: { type: string; nodeId?: string },
+    opts: { parentRunId?: string } = {},
+  ): Promise<{ runId: string }> {
     const compiled = compileWorkflow(workflow);
     if (!compiled.plan) {
       const errors = compiled.diagnostics.filter((d) => d.severity === 'error').map((d) => d.message);
       throw new Error(`workflow has errors:\n${errors.join('\n')}`);
     }
-    const { runId, projection } = this.services.store.createRun({ workflow, workflowPath, inputs, trigger });
+    const { runId, projection } = this.services.store.createRun({ workflow, workflowPath, inputs, trigger, parentRunId: opts.parentRunId });
     const exec = new RunExecution({
       services: this.services,
       executors: this.executors,

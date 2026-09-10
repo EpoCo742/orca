@@ -1,4 +1,4 @@
-import type { CostAmount } from '@orca/shared';
+import type { CostAmount, McpServerConfig } from '@orca/shared';
 import type { PermissionQuery } from './permissions.js';
 
 export type AdapterId = 'copilot' | 'fake';
@@ -11,6 +11,8 @@ export interface AgentRunSpec {
   agentMode?: 'interactive' | 'plan' | 'autopilot';
   /** JSON Schema; when set the adapter exposes a `submit_result` tool and returns `structured`. */
   outputSchema?: Record<string, unknown>;
+  /** MCP servers to attach, secrets already resolved. */
+  mcpServers?: Record<string, McpServerConfig>;
   cwd: string;
   env: Record<string, string>;
   maxPremiumRequests: number;

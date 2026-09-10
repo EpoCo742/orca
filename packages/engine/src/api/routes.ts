@@ -14,6 +14,10 @@ import {
 } from '@orca/shared';
 import type { Engine } from '../engine.js';
 import { copilotAuthStatus, copilotListModels, errorMessage } from '../adapters/copilot/client.js';
+import { MCP_PRESETS } from '../mcp/presets.js';
+import { withMcp } from '../mcp/client.js';
+import { resolveDeep } from '../secrets/resolve.js';
+import { McpServerConfig } from '@orca/shared';
 
 export function registerRoutes(engine: Engine, startedAt: number): void {
   const { app, config, workflows, runs, services } = engine;
@@ -134,6 +138,32 @@ export function registerRoutes(engine: Engine, startedAt: number): void {
   });
 
   app.post(`${API_PREFIX}/runs/:id/cancel`, (c) => c.json({ cancelled: runs.cancel(c.req.param('id')) }));
+
+  // ---------------------------------------------------------------- secrets (names only ever leave the engine)
+  app.get(`${API_PREFIX}/secrets`, (c) => c.json({ secrets: engine.secrets.list() }));
+
+  app.put(`${API_PREFIX}/secrets/:name`, async (c) => {
+    const body = z.object({ value: z.string().min(1) }).parse(await c.req.json());
+    engine.secrets.set(c.req.param('name'), body.value);
+    return c.json({ ok: true, secrets: engine.secrets.list() });
+  });
+
+  app.delete(`${API_PREFIX}/secrets/:name`, (c) => c.json({ deleted: engine.secrets.delete(c.req.param('name')), secrets: engine.secrets.list() }));
+
+  // ---------------------------------------------------------------- mcp
+  app.get(`${API_PREFIX}/mcp/presets`, (c) => c.json({ presets: MCP_PRESETS }));
+
+  app.post(`${API_PREFIX}/mcp/inspect`, async (c) => {
+    const body = z.object({ config: McpServerConfig, cwd: z.string().optional() }).parse(await c.req.json());
+    const cwd = body.cwd ?? config.workingDirectory ?? process.cwd();
+    try {
+      const resolved = resolveDeep(body.config, engine.secrets, { cwd });
+      const tools = await withMcp(resolved, cwd, (m) => m.listTools());
+      return c.json({ tools });
+    } catch (err) {
+      return c.json({ tools: [], error: errorMessage(err) }, 502);
+    }
+  });
 
   // ---------------------------------------------------------------- worktrees
   app.get(`${API_PREFIX}/runs/:id/worktrees`, (c) => c.json({ worktrees: services.worktrees.list(c.req.param('id')) }));

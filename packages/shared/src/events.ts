@@ -30,6 +30,8 @@ export type RunEvent =
   | { type: 'node.retry'; nodeId: string; scope: ScopePath; attempt: number; delayMs: number }
   | { type: 'loop.iteration'; nodeId: string; scope: ScopePath; index: number }
   | { type: 'loop.exit'; nodeId: string; scope: ScopePath; exitedBy: 'until' | 'max' | 'budget' | 'error'; iterations: number }
+  | { type: 'map.started'; nodeId: string; scope: ScopePath; items: unknown[] }
+  | { type: 'map.completed'; nodeId: string; scope: ScopePath; succeeded: number; failed: number }
   | { type: 'approval.requested'; approvalId: string; nodeId: string; scope: ScopePath; kind: ApprovalKind }
   | { type: 'approval.decided'; approvalId: string; nodeId: string; scope: ScopePath; status: ApprovalStatus }
   | { type: 'agent.session'; nodeId: string; scope: ScopePath; sessionId: string }
@@ -138,6 +140,7 @@ export interface RunProjection {
   cost: { premiumRequests: number; usd: number };
   nodes: Record<string, NodeRunState>; // key `${nodeId}@${scope}`
   iterations: Record<string, number>; // key `${loopId}@${scope}` -> current iteration index
+  mapItems: Record<string, unknown[]>; // key `${mapId}@${scope}` -> items
   lastSeq: number;
 }
 

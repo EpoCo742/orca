@@ -20,6 +20,8 @@ import type { EngineServices } from './run/context.js';
 import { registerRoutes } from './api/routes.js';
 import { registerWebSocket } from './api/ws.js';
 import type { AgentAdapter, AdapterId } from './adapters/types.js';
+import { FileSecretsProvider, MemorySecretsProvider, type SecretsProvider } from './secrets/provider.js';
+import { Redactor } from './secrets/resolve.js';
 
 export interface EngineConfig {
   host: string;
@@ -27,7 +29,7 @@ export interface EngineConfig {
   authToken: string;
   corsOrigins?: string[];
   workingDirectory?: string;
-  /** Where the SQLite database and blobs live. Default: ~/.orca */
+  /** Where the SQLite database, secrets, and blobs live. Default: ~/.orca */
   dataDir?: string;
   /** Override database path (':memory:' for tests). */
   dbPath?: string;
@@ -36,6 +38,10 @@ export interface EngineConfig {
   /** Disable the Copilot adapter (tests, offline development). */
   disableCopilot?: boolean;
   maxConcurrentAgentsGlobal?: number;
+  /** Use an in-memory secrets store (tests). */
+  memorySecrets?: boolean;
+  /** Worktree retention sweep on start (days). 0 disables. */
+  worktreeRetentionDays?: number;
 }
 
 export interface Engine {
@@ -45,6 +51,7 @@ export interface Engine {
   services: EngineServices;
   workflows: WorkflowStore;
   runs: RunManager;
+  secrets: SecretsProvider;
   logger: Logger;
   start(): Promise<{ url: string }>;
   stop(): Promise<void>;
@@ -64,7 +71,9 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   const dataDir = config.dataDir ?? defaultDataDir();
   const dbPath = config.dbPath ?? path.join(dataDir, 'orca.db');
   const db = openDatabase(dbPath);
+  const secrets: SecretsProvider = config.memorySecrets || dbPath === ':memory:' ? new MemorySecretsProvider() : new FileSecretsProvider(dataDir);
   const store = new RunStore(db);
+  store.redactor = new Redactor(secrets);
   const approvals = new ApprovalBroker(store);
   const sandbox = new ExpressionSandbox();
   await sandbox.init();
@@ -78,15 +87,19 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     sandbox,
     approvals,
     worktrees,
+    secrets,
     adapters,
     logger,
     agentSlots: { max: config.maxConcurrentAgentsGlobal ?? 8, used: 0 },
   };
   const workflows = new WorkflowStore(db, config.templatesDir ?? defaultTemplatesDir());
   const runs = new RunManager(services, defaultExecutors(), workflows);
+  services.runs = runs;
+  services.workflows = workflows;
 
   const app = new Hono();
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
+  let server: ServerType | undefined;
   const engine: Engine = {
     app,
     config,
@@ -94,6 +107,7 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
     services,
     workflows,
     runs,
+    secrets,
     logger,
     async start() {
       await new Promise<void>((resolve) => {
@@ -102,6 +116,14 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
       injectWebSocket(server!);
       const resumed = await runs.resumeAll();
       if (resumed.length) logger.info({ resumed }, 'resumed in-flight runs');
+      const days = config.worktreeRetentionDays ?? 7;
+      if (days > 0) {
+        const active = new Set(store.activeRunIds());
+        worktrees
+          .sweep(days, (id) => active.has(id))
+          .then((n) => n && logger.info({ removed: n }, 'worktree sweep'))
+          .catch((err) => logger.warn({ err: String(err) }, 'worktree sweep failed'));
+      }
       return { url: `http://${config.host}:${config.port}` };
     },
     async stop() {
@@ -113,7 +135,6 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
       db.close();
     },
   };
-  let server: ServerType | undefined;
   registerRoutes(engine, Date.now());
   registerWebSocket(engine, upgradeWebSocket);
   return engine;

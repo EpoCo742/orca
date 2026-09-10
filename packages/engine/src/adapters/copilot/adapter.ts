@@ -1,4 +1,5 @@
-import type { CopilotClient, PermissionHandler, PermissionRequest, SessionEvent, SessionHooks, Tool } from '@github/copilot-sdk';
+import type { CopilotClient, MCPServerConfig, PermissionHandler, PermissionRequest, SessionEvent, SessionHooks, Tool } from '@github/copilot-sdk';
+import type { McpServerConfig } from '@orca/shared';
 import type { Logger } from '../../logger.js';
 import { hardDenyReason, type PermissionQuery } from '../permissions.js';
 import type { AdapterHooks, AgentAdapter, AgentResult, AgentResultSubtype, AgentRunSpec } from '../types.js';
@@ -94,6 +95,7 @@ export class CopilotAdapter implements AgentAdapter {
       onPermissionRequest,
       hooks: sessionHooks,
       tools,
+      mcpServers: spec.mcpServers && Object.keys(spec.mcpServers).length ? toCopilotMcp(spec.mcpServers) : undefined,
       infiniteSessions: { enabled: true },
       enableFileChangeTracking: true,
     });
@@ -174,6 +176,14 @@ export class CopilotAdapter implements AgentAdapter {
       error: stopError,
     };
   }
+}
+
+function toCopilotMcp(servers: Record<string, McpServerConfig>): Record<string, MCPServerConfig> {
+  const out: Record<string, MCPServerConfig> = {};
+  for (const [name, s] of Object.entries(servers)) {
+    out[name] = s.type === 'stdio' ? { type: 'stdio', command: s.command, args: s.args, env: s.env } : { type: s.type, url: s.url, headers: s.headers };
+  }
+  return out;
 }
 
 const NOISY_EVENTS = new Set(['assistant.streaming_delta', 'assistant.tool_call_delta', 'assistant.reasoning_delta', 'session.background_tasks_changed', 'pending_messages.modified']);

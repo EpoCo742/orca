@@ -9,6 +9,7 @@ export function emptyProjection(runId: string, workflowId: string, inputs: Recor
     cost: { premiumRequests: 0, usd: 0 },
     nodes: {},
     iterations: {},
+    mapItems: {},
     lastSeq: 0,
   };
 }
@@ -87,6 +88,11 @@ export function applyRunEvent(p: RunProjection, stored: StoredRunEvent): RunProj
       break;
     case 'loop.exit':
       break;
+    case 'map.started':
+      p.mapItems[nodeKey(e.nodeId, e.scope)] = e.items;
+      break;
+    case 'map.completed':
+      break;
     case 'approval.requested': {
       const k = nodeKey(e.nodeId, e.scope);
       if (p.nodes[k]) p.nodes[k].status = 'waiting';
@@ -98,6 +104,9 @@ export function applyRunEvent(p: RunProjection, stored: StoredRunEvent): RunProj
       break;
     }
     case 'agent.session':
+    case 'worktree.created':
+    case 'worktree.removed':
+    case 'notify':
       break;
     case 'agent.cost':
       if (e.cost.unit === 'premium_requests') p.cost.premiumRequests += e.cost.amount;

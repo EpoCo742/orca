@@ -13,6 +13,7 @@ import { createLogger } from '../logger.js';
 import { WorkflowStore } from '../workflows/store.js';
 import { RunManager } from './manager.js';
 import { WorktreeManager } from './worktrees.js';
+import { MemorySecretsProvider } from '../secrets/provider.js';
 import { defaultExecutors } from './executors/index.js';
 import type { EngineServices } from './context.js';
 
@@ -28,7 +29,7 @@ function harness() {
   const store = new RunStore(db);
   const logger = createLogger('silent');
   const worktrees = new WorktreeManager(db, logger);
-  const services: EngineServices = { store, sandbox, approvals: new ApprovalBroker(store), worktrees, adapters: { fake: new FakeAdapter() }, logger, agentSlots: { max: 8, used: 0 } };
+  const services: EngineServices = { store, sandbox, approvals: new ApprovalBroker(store), worktrees, secrets: new MemorySecretsProvider(), adapters: { fake: new FakeAdapter() }, logger, agentSlots: { max: 8, used: 0 } };
   const runs = new RunManager(services, defaultExecutors(), new WorkflowStore(db));
   return { store, services, runs, worktrees, approvals: services.approvals };
 }

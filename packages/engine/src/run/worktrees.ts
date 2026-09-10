@@ -190,6 +190,24 @@ export class WorktreeManager {
     opts.emit?.({ type: 'worktree.removed', nodeId: opts.nodeId ?? rec.ownerNodeId, scope: opts.scope ?? '', ownerNodeId: rec.ownerNodeId, path: rec.path, reason: opts.reason });
   }
 
+  /** Remove worktrees of finished runs older than `days`. Returns the number removed. */
+  async sweep(days: number, isRunActive: (runId: string) => boolean): Promise<number> {
+    const cutoff = Date.now() - days * 86_400_000;
+    const rows = this.db.prepare("SELECT * FROM worktrees WHERE status IN ('active','kept')").all() as Record<string, unknown>[];
+    let removed = 0;
+    for (const r of rows.map(toRecord)) {
+      if (isRunActive(r.runId)) continue;
+      if (new Date(r.createdAt).getTime() > cutoff && fs.existsSync(r.path)) continue;
+      try {
+        await this.remove(r, { force: true, deleteBranch: true, reason: fs.existsSync(r.path) ? `retention sweep (${days} days)` : 'directory missing' });
+        removed++;
+      } catch (err) {
+        this.logger.warn({ err: String(err), path: r.path }, 'sweep could not remove worktree');
+      }
+    }
+    return removed;
+  }
+
   keep(rec: WorktreeRecord): void {
     this.db.prepare("UPDATE worktrees SET status='kept' WHERE id=?").run(rec.id);
     void git(rec.repoPath, ['worktree', 'unlock', worktreeTop(rec)], { reject: false });

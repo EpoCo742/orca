@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c05",
+  "name": "Parallel review",
+  "description": "Fan out one read-only reviewer per source file (up to 4 at once), then a judge merges and ranks the findings into one report.",
+  "inputs": [
+    { "name": "pattern", "type": "string", "default": "src test", "description": "Paths (space separated) passed to `git ls-files` to pick the files to review" }
+  ],
+  "settings": {
+    "repoPath": "../../orca-sample-target",
+    "defaultModel": "claude-sonnet-5",
+    "defaultEffort": "low",
+    "maxConcurrentAgents": 4
+  },
+  "nodes": [
+    { "id": "start", "type": "trigger.manual", "position": { "x": 40, "y": 200 }, "config": { "inputsForm": ["pattern"] } },
+    { "id": "list", "type": "action.shell", "position": { "x": 260, "y": 200 }, "config": { "command": "git ls-files {{ inputs.pattern }}" } },
+    { "id": "files", "type": "data.transform", "position": { "x": 480, "y": 200 }, "config": { "code": "return orca.lines(ctx.nodes.list.stdout).filter(f => /\\.(js|ts|mjs|cjs|tsx|jsx|py|go|rs|java|cs)$/.test(f)).slice(0, 12)" } },
+    { "id": "review", "type": "control.map", "position": { "x": 700, "y": 80 }, "size": { "w": 520, "h": 300 }, "config": { "items": "nodes.files.value", "concurrency": 4, "continueOnError": true } },
+    { "id": "reviewer", "type": "agent.copilot", "position": { "x": 40, "y": 90 }, "parent": "review", "config": {
+      "prompt": "Review the file `{{ item }}` in this repository for bugs, risky edge cases, and readability problems. Read only that file and, if useful, its tests. Do not modify anything.\n\nCall submit_result with: file (string), score (0-10, 10 = excellent), findings (array of {severity: 'info'|'warning'|'error', line?: number, message}).",
+      "allowedTools": ["Read", "Shell(Get-Content*)", "Shell(cat*)", "Shell(git log*)", "Shell(git blame*)"],
+      "disallowedTools": ["Write"],
+      "outputSchema": { "type": "object", "required": ["file", "score", "findings"], "properties": { "file": { "type": "string" }, "score": { "type": "number" }, "findings": { "type": "array", "items": { "type": "object", "required": ["severity", "message"], "properties": { "severity": { "type": "string", "enum": ["info", "warning", "error"] }, "line": { "type": "number" }, "message": { "type": "string" } } } } } },
+      "approval": { "onUnresolved": "deny", "timeoutSec": 120, "autoAllowReadOnly": true },
+      "maxPremiumRequests": 8, "maxToolCalls": 20, "timeoutMs": 240000, "isolation": "none"
+    } },
+    { "id": "collect", "type": "data.transform", "position": { "x": 1280, "y": 200 }, "config": { "code": "return ctx.nodes.review.results.map((r, i) => r.error ? { file: ctx.nodes.review.items[i], error: r.error } : r.reviewer.json)" } },
+    { "id": "merge", "type": "agent.copilot", "position": { "x": 1500, "y": 200 }, "config": {
+      "prompt": "You are the lead reviewer. Merge these per-file reviews into one ranked report. Deduplicate, drop nitpicks, order by severity, and give an overall verdict.\n\n```json\n{{ orca.json(nodes.collect.value) }}\n```\n\nCall submit_result with: verdict ('ship'|'fix first'|'rewrite'), overall_score (0-10), top_findings (array of {file, severity, message}, max 10), summary (markdown, max 200 words).",
+      "allowedTools": ["Read"],
+      "disallowedTools": ["Write"],
+      "outputSchema": { "type": "object", "required": ["verdict", "overall_score", "top_findings", "summary"], "properties": { "verdict": { "type": "string" }, "overall_score": { "type": "number" }, "top_findings": { "type": "array", "items": { "type": "object", "properties": { "file": { "type": "string" }, "severity": { "type": "string" }, "message": { "type": "string" } } } }, "summary": { "type": "string" } } },
+      "approval": { "onUnresolved": "deny", "timeoutSec": 120 },
+      "maxPremiumRequests": 6, "maxToolCalls": 5, "timeoutMs": 180000, "isolation": "none"
+    } },
+    { "id": "report", "type": "control.gate", "position": { "x": 1720, "y": 200 }, "config": {
+      "title": "Review report",
+      "instructions": "Merged findings from {{ nodes.review.succeeded }} file reviews ({{ nodes.review.failed }} failed). Approve to acknowledge.",
+      "show": [
+        { "label": "Verdict", "expression": "nodes.merge.json.verdict + ' (' + nodes.merge.json.overall_score + '/10)'", "render": "text" },
+        { "label": "Summary", "expression": "nodes.merge.json.summary", "render": "markdown" },
+        { "label": "Top findings", "expression": "nodes.merge.json.top_findings", "render": "json" },
+        { "label": "Per-file scores", "expression": "nodes.collect.value.map(r => (r.file || '?') + ': ' + (r.score !== undefined ? r.score + '/10' : 'error')).join('\\n')", "render": "text" }
+      ]
+    } },
+    { "id": "done", "type": "action.notify", "position": { "x": 1940, "y": 200 }, "config": { "title": "Review complete", "message": "{{ nodes.merge.json.verdict }} · {{ nodes.merge.json.overall_score }}/10", "level": "info" } }
+  ],
+  "edges": [
+    { "id": "e1", "from": { "node": "start", "port": "done" }, "to": { "node": "list", "port": "trigger" } },
+    { "id": "e2", "from": { "node": "list", "port": "done" }, "to": { "node": "files", "port": "trigger" } },
+    { "id": "e3", "from": { "node": "files", "port": "done" }, "to": { "node": "review", "port": "trigger" } },
+    { "id": "e4", "from": { "node": "review", "port": "done" }, "to": { "node": "collect", "port": "trigger" } },
+    { "id": "e5", "from": { "node": "collect", "port": "done" }, "to": { "node": "merge", "port": "trigger" } },
+    { "id": "e6", "from": { "node": "merge", "port": "done" }, "to": { "node": "report", "port": "trigger" } },
+    { "id": "e7", "from": { "node": "report", "port": "done" }, "to": { "node": "done", "port": "trigger" } }
+  ],
+  "ui": { "notes": "The map body has one node (reviewer); each item is a file path available as `item`." }
+}

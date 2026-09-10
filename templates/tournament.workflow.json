@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d06",
+  "name": "Tournament",
+  "description": "The same task given to three agent variants in parallel, each in its own worktree; tests pick the candidates and a judge picks the winner; you approve; losers are discarded.",
+  "inputs": [
+    { "name": "task", "type": "string", "required": true, "default": "Fix src/math.js so the whole test suite passes without changing the tests: average() must include the first element and divide() must return exact results and throw on division by zero.", "description": "The task every contestant attempts" }
+  ],
+  "settings": {
+    "repoPath": "../../orca-sample-target",
+    "defaultModel": "claude-sonnet-5",
+    "defaultEffort": "medium",
+    "maxConcurrentAgents": 3,
+    "worktree": { "baseRef": "head", "linkDirs": ["node_modules"] }
+  },
+  "nodes": [
+    { "id": "start", "type": "trigger.manual", "position": { "x": 40, "y": 220 }, "config": { "inputsForm": ["task"] } },
+    { "id": "variants", "type": "data.transform", "position": { "x": 260, "y": 220 }, "config": { "code": "return [\n  { name: 'minimal', style: 'Make the smallest possible change.' },\n  { name: 'defensive', style: 'Add input validation and clear error messages while fixing the bug.' },\n  { name: 'documented', style: 'Fix the bug and add concise JSDoc comments to every exported function.' }\n]" } },
+    { "id": "contest", "type": "control.map", "position": { "x": 480, "y": 80 }, "size": { "w": 560, "h": 300 }, "config": { "items": "nodes.variants.value", "concurrency": 3, "continueOnError": true } },
+    { "id": "implement", "type": "agent.copilot", "position": { "x": 30, "y": 90 }, "parent": "contest", "config": {
+      "prompt": "You are contestant '{{ item.name }}'. Style rule: {{ item.style }}\n\nTask:\n{{ inputs.task }}\n\nYou are in an isolated git worktree; edit freely. Run `npx vitest run` before finishing. Reply with one line summarizing your change.",
+      "allowedTools": ["Read", "Write", "Shell(npx vitest*)", "Shell(npm test*)", "Shell(node *)", "Shell(git diff*)", "Shell(git status*)", "Shell(Get-ChildItem*)", "Shell(Get-Content*)", "Shell(ls*)", "Shell(cat*)"],
+      "approval": { "onUnresolved": "deny", "timeoutSec": 300, "autoAllowReadOnly": true },
+      "maxPremiumRequests": 20, "maxToolCalls": 60, "timeoutMs": 600000, "isolation": "worktree"
+    } },
+    { "id": "test", "type": "action.shell", "position": { "x": 300, "y": 90 }, "parent": "contest", "config": { "command": "npx vitest run", "worktreeOf": "implement" } },
+    { "id": "diffs", "type": "data.transform", "position": { "x": 1100, "y": 220 }, "config": { "code": "return ctx.nodes.contest.results.map((r, i) => ({ index: i, name: ctx.nodes.variants.value[i].name, ok: !r.error && r.test.exit_code === 0, summary: r.implement ? r.implement.text : r.error, files: r.implement ? r.implement.files_changed : [] }))" } },
+    { "id": "judge", "type": "agent.copilot", "position": { "x": 1320, "y": 220 }, "config": {
+      "prompt": "Three contestants attempted the same task in separate git worktrees under .orca/worktrees/ of this repository (owner keys implement-0, implement-1, implement-2). Candidate summary:\n\n```json\n{{ orca.json(nodes.diffs.value) }}\n```\n\nFor each candidate whose tests passed (ok = true), inspect its change with `git diff main..orca/tournament/{{ run.id.slice(0, 8) }}/implement-<index>` (run it from the repository root). Judge correctness first, then simplicity and clarity.\n\nCall submit_result with: winner (index number, or -1 if none passed), ranking (array of indexes best to worst), rationale (markdown, max 150 words).",
+      "allowedTools": ["Read", "Shell(git diff*)", "Shell(git log*)", "Shell(git show*)", "Shell(git branch*)"],
+      "disallowedTools": ["Write"],
+      "outputSchema": { "type": "object", "required": ["winner", "ranking", "rationale"], "properties": { "winner": { "type": "number" }, "ranking": { "type": "array", "items": { "type": "number" } }, "rationale": { "type": "string" } } },
+      "approval": { "onUnresolved": "deny", "timeoutSec": 300, "autoAllowReadOnly": true },
+      "maxPremiumRequests": 12, "maxToolCalls": 30, "timeoutMs": 300000, "isolation": "none"
+    } },
+    { "id": "has_winner", "type": "control.condition", "position": { "x": 1540, "y": 220 }, "config": { "expression": "nodes.judge.json.winner >= 0" } },
+    { "id": "approve", "type": "control.gate", "position": { "x": 1760, "y": 160 }, "config": {
+      "title": "Pick the winner",
+      "instructions": "The judge chose contestant #{{ nodes.judge.json.winner }} ({{ nodes.diffs.value[nodes.judge.json.winner].name }}). Approve to keep its worktree and discard the others.",
+      "show": [
+        { "label": "Rationale", "expression": "nodes.judge.json.rationale", "render": "markdown" },
+        { "label": "Candidates", "expression": "nodes.diffs.value", "render": "json" }
+      ]
+    } },
+    { "id": "keep", "type": "action.git", "position": { "x": 1980, "y": 100 }, "config": { "op": "worktree.keep", "target": "implement-{{ nodes.judge.json.winner }}" } },
+    { "id": "losers", "type": "control.map", "position": { "x": 2200, "y": 40 }, "size": { "w": 300, "h": 200 }, "config": { "items": "[0, 1, 2].filter(i => i !== nodes.judge.json.winner)", "concurrency": 3 } },
+    { "id": "discard", "type": "action.git", "position": { "x": 30, "y": 80 }, "parent": "losers", "config": { "op": "worktree.remove", "target": "implement-{{ item }}" } },
+    { "id": "done", "type": "action.notify", "position": { "x": 2540, "y": 100 }, "config": { "title": "Tournament decided", "message": "Winner: {{ nodes.diffs.value[nodes.judge.json.winner].name }}. Its branch is kept for you to review or open a PR from.", "level": "success" } },
+    { "id": "none", "type": "action.notify", "position": { "x": 1760, "y": 360 }, "config": { "title": "No contestant passed", "message": "{{ nodes.judge.json.rationale }}", "level": "warning" } }
+  ],
+  "edges": [
+    { "id": "e1", "from": { "node": "start", "port": "done" }, "to": { "node": "variants", "port": "trigger" } },
+    { "id": "e2", "from": { "node": "variants", "port": "done" }, "to": { "node": "contest", "port": "trigger" } },
+    { "id": "e3", "from": { "node": "implement", "port": "done" }, "to": { "node": "test", "port": "trigger" } },
+    { "id": "e4", "from": { "node": "contest", "port": "done" }, "to": { "node": "diffs", "port": "trigger" } },
+    { "id": "e5", "from": { "node": "diffs", "port": "done" }, "to": { "node": "judge", "port": "trigger" } },
+    { "id": "e6", "from": { "node": "judge", "port": "done" }, "to": { "node": "has_winner", "port": "trigger" } },
+    { "id": "e7", "from": { "node": "has_winner", "port": "true" }, "to": { "node": "approve", "port": "trigger" } },
+    { "id": "e8", "from": { "node": "has_winner", "port": "false" }, "to": { "node": "none", "port": "trigger" } },
+    { "id": "e9", "from": { "node": "approve", "port": "approved" }, "to": { "node": "keep", "port": "trigger" } },
+    { "id": "e10", "from": { "node": "keep", "port": "done" }, "to": { "node": "losers", "port": "trigger" } },
+    { "id": "e11", "from": { "node": "losers", "port": "done" }, "to": { "node": "done", "port": "trigger" } }
+  ],
+  "ui": { "notes": "Map bodies with isolation = worktree get one worktree per item (implement-0, -1, -2). Git nodes outside the map address them by that key." }
+}

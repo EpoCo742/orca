@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS runs (
   finished_at TEXT,
   cost_premium_requests REAL NOT NULL DEFAULT 0,
   cost_usd REAL NOT NULL DEFAULT 0,
-  error TEXT
+  error TEXT,
+  parent_run_id TEXT
 );
 CREATE INDEX IF NOT EXISTS runs_workflow ON runs(workflow_id, created_at DESC);
 CREATE TABLE IF NOT EXISTS run_events (
@@ -91,9 +92,16 @@ export function openDatabase(dbPath: string): Database {
   db.exec('PRAGMA busy_timeout = 5000;');
   db.exec(SCHEMA);
   db.prepare('INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)').run('schema_version', '1');
+  migrate(db);
   return db;
 }
 
 export function nowIso(): string {
   return new Date().toISOString();
+}
+
+/** Additive migrations for databases created by earlier versions. */
+function migrate(db: DatabaseSync): void {
+  const cols = (db.prepare('PRAGMA table_info(runs)').all() as Array<{ name: string }>).map((c) => c.name);
+  if (!cols.includes('parent_run_id')) db.exec('ALTER TABLE runs ADD COLUMN parent_run_id TEXT');
 }

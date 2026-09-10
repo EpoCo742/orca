@@ -9,6 +9,7 @@ import { Inspector } from './components/Inspector.js';
 import { RunPanel } from './components/RunPanel.js';
 import { ApprovalsPanel } from './components/Approvals.js';
 import { RunInputsDialog } from './components/RunInputsDialog.js';
+import { SecretsPanel } from './components/Secrets.js';
 
 type Mode = 'edit' | 'run';
 
@@ -39,6 +40,7 @@ function Shell({ api }: { api: Api }) {
   const [error, setError] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
   const [inputsDialog, setInputsDialog] = useState(false);
+  const [secretNames, setSecretNames] = useState<string[]>([]);
   const socket = useRef<EngineSocket | undefined>(undefined);
 
   const refreshWorkflows = useCallback(() => api.workflows().then(setWorkflows).catch((e: Error) => setError(e.message)), [api]);
@@ -53,6 +55,7 @@ function Shell({ api }: { api: Api }) {
     api.models().then((r) => setModels(r.models)).catch(() => undefined);
     api.authStatus().then(setAuth).catch(() => undefined);
     api.approvals().then((a) => runs.setApprovals(a)).catch(() => undefined);
+    api.secrets().then(setSecretNames).catch(() => undefined);
     const s = new EngineSocket(api.conn);
     socket.current = s;
     const off = s.on((msg) => runs.handleWs(msg));
@@ -282,6 +285,7 @@ function Shell({ api }: { api: Api }) {
             </>
           )}
           {mode === 'edit' && editor.document && <Palette disabled={false} />}
+          <SecretsPanel api={api} names={secretNames} onChange={setSecretNames} />
         </aside>
         <main className="canvas-wrap">
           {doc ? (
@@ -301,7 +305,9 @@ function Shell({ api }: { api: Api }) {
           )}
         </main>
         <aside className="rightbar">
-          {doc && mode === 'edit' && <Inspector document={doc} nodeId={editor.selectedNodeId} edgeId={editor.selectedEdgeId} diagnostics={editor.diagnostics} models={models} readOnly={false} />}
+          {doc && mode === 'edit' && (
+            <Inspector document={doc} nodeId={editor.selectedNodeId} edgeId={editor.selectedEdgeId} diagnostics={editor.diagnostics} models={models} readOnly={false} api={api} secretNames={secretNames} />
+          )}
           {doc && mode === 'run' && activeRun && runs.activeRunId && <RunPanel api={api} runId={runs.activeRunId} run={activeRun} workflow={doc} nodeId={editor.selectedNodeId} />}
         </aside>
       </div>

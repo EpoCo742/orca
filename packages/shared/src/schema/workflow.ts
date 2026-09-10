@@ -58,6 +58,14 @@ export const WorkflowInput = z.object({
 });
 export type WorkflowInput = z.infer<typeof WorkflowInput>;
 
+/** MCP server configuration. String values may contain `${SECRET:NAME}` and `${CWD}` placeholders. */
+export const McpServerConfig = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('stdio'), command: z.string().min(1), args: z.array(z.string()).default([]), env: z.record(z.string(), z.string()).default({}) }),
+  z.object({ type: z.literal('http'), url: z.string().min(1), headers: z.record(z.string(), z.string()).default({}) }),
+  z.object({ type: z.literal('sse'), url: z.string().min(1), headers: z.record(z.string(), z.string()).default({}) }),
+]);
+export type McpServerConfig = z.infer<typeof McpServerConfig>;
+
 export const WorkflowSettings = z.object({
   /** Repository the workflow acts on. Relative paths resolve against the workflow file's directory. */
   repoPath: z.string().optional(),
@@ -69,6 +77,9 @@ export const WorkflowSettings = z.object({
   unattended: z.boolean().default(false),
   env: z.record(z.string(), z.string()).default({}),
   secrets: z.array(z.string()).default([]),
+  /** Named MCP servers available to agent nodes (by name) and MCP tool nodes. */
+  mcpServers: z.record(z.string(), McpServerConfig).default({}),
+  retention: z.object({ worktreesDays: z.number().positive().default(7) }).prefault({}),
   worktree: z
     .object({
       /** `head`: branch from the current HEAD of the main checkout; `default-branch`: from origin's default branch. */

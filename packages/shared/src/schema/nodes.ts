@@ -95,6 +95,8 @@ export const AgentCopilotConfig = z.object({
   outputSchema: z.record(z.string(), z.unknown()).optional(),
   /** Run inside another node's worktree instead of the repo root (or this node's own worktree). */
   worktreeOf: NodeId.optional(),
+  /** Names of MCP servers from workflow settings to attach to this session. */
+  mcpServers: z.array(z.string()).default([]),
   /**
    * Orca permission rules. Forms: `Read`, `Write`, `Shell(<glob>)`, `Mcp(<server>/<tool-glob>)`, `Url(<glob>)`.
    * A bare `Shell` allows every shell command. Rules are matched against Copilot permission requests.
@@ -111,21 +113,63 @@ export const AgentCopilotConfig = z.object({
 });
 export type AgentCopilotConfig = z.infer<typeof AgentCopilotConfig>;
 
+// ---------------------------------------------------------------- control.map
+export const MapConfig = z.object({
+  /** Expression returning an array. Each element runs the body once as `item` (with `index`). */
+  items: z.string().min(1),
+  concurrency: z.number().int().min(1).max(16).default(4),
+  /** Stop scheduling new items after the first failure. */
+  failFast: z.boolean().default(false),
+  /** Continue the run when some items fail; failures appear as `{ error }` entries in `results`. */
+  continueOnError: z.boolean().default(true),
+});
+export type MapConfig = z.infer<typeof MapConfig>;
+
+// ---------------------------------------------------------------- control.join
+export const JoinConfig = z.object({
+  /** all: every incoming edge must fire; any: the first live edge is enough. */
+  mode: z.enum(['all', 'any']).default('all'),
+});
+export type JoinConfig = z.infer<typeof JoinConfig>;
+
+// ---------------------------------------------------------------- workflow.sub
+export const SubWorkflowConfig = z.object({
+  /** Workflow id (registered) or a path relative to this workflow's file. */
+  workflowRef: z.string().min(1),
+  /** Inputs for the child run; string values are templates. */
+  inputs: z.record(z.string(), z.string()).default({}),
+  timeoutMs: z.number().int().positive().default(3_600_000),
+});
+export type SubWorkflowConfig = z.infer<typeof SubWorkflowConfig>;
+
+// ---------------------------------------------------------------- action.mcp_tool
+export const McpToolConfig = z.object({
+  /** Name of a server in workflow settings.mcpServers. */
+  server: z.string().min(1),
+  tool: z.string().min(1),
+  /** Tool arguments; string values are templates. */
+  args: z.record(z.string(), z.unknown()).default({}),
+  timeoutMs: z.number().int().positive().default(60_000),
+});
+export type McpToolConfig = z.infer<typeof McpToolConfig>;
+
 // ---------------------------------------------------------------- action.git
+/** Worktree owner: a node id, optionally with a map-item suffix (`implement-2`); templated. */
+const WorktreeTarget = z.string().min(1);
 export const GitConfig = z.discriminatedUnion('op', [
-  z.object({ op: z.literal('diff'), target: NodeId, base: z.string().optional() }),
-  z.object({ op: z.literal('commit'), target: NodeId, message: z.string().min(1), addAll: z.boolean().default(true), allowEmpty: z.boolean().default(false) }),
-  z.object({ op: z.literal('push'), target: NodeId, remote: z.string().default('origin'), setUpstream: z.boolean().default(true) }),
+  z.object({ op: z.literal('diff'), target: WorktreeTarget, base: z.string().optional() }),
+  z.object({ op: z.literal('commit'), target: WorktreeTarget, message: z.string().min(1), addAll: z.boolean().default(true), allowEmpty: z.boolean().default(false) }),
+  z.object({ op: z.literal('push'), target: WorktreeTarget, remote: z.string().default('origin'), setUpstream: z.boolean().default(true) }),
   z.object({
     op: z.literal('pr.create'),
-    target: NodeId,
+    target: WorktreeTarget,
     title: z.string().min(1),
     body: z.string().default(''),
     base: z.string().optional(),
     draft: z.boolean().default(true),
   }),
-  z.object({ op: z.literal('worktree.remove'), target: NodeId, force: z.boolean().default(true), deleteBranch: z.boolean().default(true) }),
-  z.object({ op: z.literal('worktree.keep'), target: NodeId }),
+  z.object({ op: z.literal('worktree.remove'), target: WorktreeTarget, force: z.boolean().default(true), deleteBranch: z.boolean().default(true) }),
+  z.object({ op: z.literal('worktree.keep'), target: WorktreeTarget }),
 ]);
 export type GitConfig = z.infer<typeof GitConfig>;
 
@@ -243,7 +287,58 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
       { id: 'worktree_path', type: 'string', label: 'Worktree path' },
     ],
     config: GitConfig,
-    templateFields: ['message', 'title', 'body'],
+    templateFields: ['message', 'title', 'body', 'target'],
+  },
+  'control.map': {
+    type: 'control.map',
+    category: 'control',
+    label: 'Map (fan-out)',
+    description: 'Runs its body once per item of a list, in parallel up to a concurrency limit.',
+    inputs: [],
+    outputs: [
+      { id: 'results', type: 'json', label: 'Results (per item)' },
+      { id: 'items', type: 'json', label: 'Items' },
+      { id: 'succeeded', type: 'number', label: 'Succeeded' },
+      { id: 'failed', type: 'number', label: 'Failed' },
+    ],
+    config: MapConfig,
+    container: 'map',
+  },
+  'control.join': {
+    type: 'control.join',
+    category: 'control',
+    label: 'Join',
+    description: 'Waits for all (or any) incoming branches and merges their outputs.',
+    inputs: [],
+    outputs: [{ id: 'merged', type: 'json', label: 'Merged outputs' }],
+    config: JoinConfig,
+  },
+  'workflow.sub': {
+    type: 'workflow.sub',
+    category: 'control',
+    label: 'Sub-workflow',
+    description: 'Runs another workflow as a child run and returns its top-level outputs.',
+    inputs: [],
+    outputs: [
+      { id: 'run_id', type: 'string', label: 'Child run id' },
+      { id: 'status', type: 'string', label: 'Status' },
+      { id: 'outputs', type: 'json', label: 'Child outputs' },
+    ],
+    config: SubWorkflowConfig,
+  },
+  'action.mcp_tool': {
+    type: 'action.mcp_tool',
+    category: 'action',
+    label: 'MCP tool',
+    description: 'Calls one MCP tool directly (no model) with templated arguments.',
+    inputs: [],
+    outputs: [
+      { id: 'result', type: 'json', label: 'Result' },
+      { id: 'text', type: 'string', label: 'Text' },
+      { id: 'is_error', type: 'boolean', label: 'Is error' },
+    ],
+    config: McpToolConfig,
+    templateFields: ['args'],
   },
   'control.gate': {
     type: 'control.gate',

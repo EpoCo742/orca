@@ -12,6 +12,7 @@ export interface OrcaNodeData extends Record<string, unknown> {
   status?: NodeRunState['status'];
   runState?: NodeRunState;
   iteration?: number;
+  progress?: string;
   hasError?: boolean;
   hasWarning?: boolean;
   subtitle?: string;
@@ -34,6 +35,14 @@ export function subtitleFor(node: NodeBase): string {
       return String(c.code ?? '').split('\n')[0] ?? '';
     case 'action.git':
       return `${String(c.op ?? '')} → ${String(c.target ?? '?')}`;
+    case 'control.map':
+      return `for each of ${String(c.items ?? '')} (×${String(c.concurrency ?? 4)})`;
+    case 'control.join':
+      return `join ${String(c.mode ?? 'all')}`;
+    case 'workflow.sub':
+      return String(c.workflowRef ?? '');
+    case 'action.mcp_tool':
+      return `${String(c.server ?? '?')}/${String(c.tool ?? '?')}`;
     case 'control.gate':
       return String(c.title ?? '');
     case 'action.notify':
@@ -53,7 +62,21 @@ export function toFlow(doc: WorkflowDocument, opts: { diagnostics?: Diagnostic[]
   const nodes: OrcaRFNode[] = ordered.map((n) => {
     const def = getNodeType(n.type);
     const state = opts.run ? bestState(opts.run, n, doc) : undefined;
-    const iteration = opts.run && def?.container ? opts.run.iterations[nodeKey(n.id, '')] : undefined;
+    let iteration: number | undefined;
+    let progress: string | undefined;
+    if (opts.run && def?.container === 'loop') iteration = opts.run.iterations[nodeKey(n.id, '')];
+    if (opts.run && def?.container === 'map') {
+      const items = opts.run.mapItems[nodeKey(n.id, '')];
+      if (items) {
+        const children = doc.nodes.filter((c) => c.parent === n.id).map((c) => c.id);
+        let done = 0;
+        for (let i = 0; i < items.length; i++) {
+          const states = children.map((c) => opts.run!.nodes[nodeKey(c, `${n.id}[${i}]`)]);
+          if (states.every((s) => s && (s.status === 'completed' || s.status === 'skipped' || s.status === 'failed'))) done++;
+        }
+        progress = `${done}/${items.length} items`;
+      }
+    }
     return {
       id: n.id,
       type: def?.container ? 'loop' : 'orca',
@@ -72,6 +95,7 @@ export function toFlow(doc: WorkflowDocument, opts: { diagnostics?: Diagnostic[]
         status: state?.status,
         runState: state,
         iteration,
+        progress,
         hasError: errs.has(n.id),
         hasWarning: warns.has(n.id),
         subtitle: subtitleFor(n),
@@ -100,6 +124,12 @@ function bestState(run: RunProjection, n: NodeBase, doc: WorkflowDocument): Node
   if (!n.parent) return run.nodes[nodeKey(n.id, '')];
   const parent = doc.nodes.find((p) => p.id === n.parent);
   if (!parent) return undefined;
+  const items = run.mapItems[nodeKey(parent.id, '')];
+  if (items) {
+    // map body: show running if any item runs, failed if any failed, else the last known state
+    const states = items.map((_, i) => run.nodes[nodeKey(n.id, `${parent.id}[${i}]`)]).filter((s): s is NodeRunState => !!s);
+    return states.find((s) => s.status === 'running') ?? states.find((s) => s.status === 'waiting') ?? states.find((s) => s.status === 'failed') ?? states[states.length - 1];
+  }
   const idx = run.iterations[nodeKey(parent.id, '')];
   if (idx === undefined) return undefined;
   for (let i = idx; i >= 0; i--) {

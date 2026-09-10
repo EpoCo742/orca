@@ -3,6 +3,7 @@ import type {
   AuthStatusResponse,
   Diagnostic,
   HealthResponse,
+  McpServerConfig,
   ModelsResponse,
   RunDetail,
   RunSummary,
@@ -19,6 +20,21 @@ import type {
 export interface EngineConnection {
   baseUrl: string;
   token: string;
+}
+
+export interface McpPreset {
+  id: string;
+  name: string;
+  description: string;
+  config: McpServerConfig;
+  requiredSecrets: string[];
+  notes?: string;
+}
+
+export interface McpToolInfo {
+  name: string;
+  description?: string;
+  inputSchema: unknown;
 }
 
 export function readConnection(): EngineConnection | undefined {
@@ -102,6 +118,12 @@ export class Api {
     this.request<{ worktree: WorktreeRecord; patch: string; stats: { files: number; insertions: number; deletions: number }; files: string[] }>('GET', `/runs/${runId}/worktrees/${owner}/diff`);
   worktreeRemove = (runId: string, owner: string) => this.request<{ removed: boolean }>('POST', `/runs/${runId}/worktrees/${owner}/remove`);
   worktreeKeep = (runId: string, owner: string) => this.request<{ kept: boolean }>('POST', `/runs/${runId}/worktrees/${owner}/keep`);
+
+  secrets = () => this.request<{ secrets: string[] }>('GET', '/secrets').then((r) => r.secrets);
+  setSecret = (name: string, value: string) => this.request<{ ok: boolean; secrets: string[] }>('PUT', `/secrets/${name}`, { value }).then((r) => r.secrets);
+  deleteSecret = (name: string) => this.request<{ deleted: boolean; secrets: string[] }>('DELETE', `/secrets/${name}`).then((r) => r.secrets);
+  mcpPresets = () => this.request<{ presets: McpPreset[] }>('GET', '/mcp/presets').then((r) => r.presets);
+  mcpInspect = (config: McpServerConfig, cwd?: string) => this.request<{ tools: McpToolInfo[]; error?: string }>('POST', '/mcp/inspect', { config, cwd });
 
   approvals = (status: 'pending' | 'all' = 'pending') => this.request<{ approvals: ApprovalRecord[] }>('GET', `/approvals?status=${status}`).then((r) => r.approvals);
   decide = (id: string, decision: { status: 'approved' | 'rejected'; comment?: string; remember?: 'none' | 'run' | 'workflow' }) =>

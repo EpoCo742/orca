@@ -44,11 +44,14 @@ export function hashDocument(doc: WorkflowDocument): string {
 
 /** Append-only run log plus the projections and side tables that hang off it. */
 export class RunStore extends EventEmitter<RunStoreEvents> {
+  /** Optional redaction applied to every persisted event and transcript row. */
+  redactor: { redactJson<T>(v: T): T; redact(s: string): string } | undefined;
+
   constructor(private readonly db: Database) {
     super();
   }
 
-  createRun(args: { workflow: WorkflowDocument; workflowPath: string; inputs: Record<string, unknown>; trigger: { type: string; nodeId?: string } }): {
+  createRun(args: { workflow: WorkflowDocument; workflowPath: string; inputs: Record<string, unknown>; trigger: { type: string; nodeId?: string }; parentRunId?: string }): {
     runId: string;
     projection: RunProjection;
   } {
@@ -56,17 +59,18 @@ export class RunStore extends EventEmitter<RunStoreEvents> {
     const ts = nowIso();
     this.db
       .prepare(
-        `INSERT INTO runs (id, workflow_id, workflow_name, workflow_hash, workflow_snapshot, workflow_path, status, inputs, trigger, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)`,
+        `INSERT INTO runs (id, workflow_id, workflow_name, workflow_hash, workflow_snapshot, workflow_path, status, inputs, trigger, created_at, parent_run_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)`,
       )
-      .run(runId, args.workflow.id, args.workflow.name, hashDocument(args.workflow), JSON.stringify(args.workflow), args.workflowPath, JSON.stringify(args.inputs), JSON.stringify(args.trigger), ts);
+      .run(runId, args.workflow.id, args.workflow.name, hashDocument(args.workflow), JSON.stringify(args.workflow), args.workflowPath, JSON.stringify(args.inputs), JSON.stringify(args.trigger), ts, args.parentRunId ?? null);
     const projection = emptyProjection(runId, args.workflow.id, args.inputs);
     const stored = this.append(runId, { type: 'run.created', workflowId: args.workflow.id, inputs: args.inputs, trigger: args.trigger });
     applyRunEvent(projection, stored);
     return { runId, projection };
   }
 
-  append(runId: string, event: RunEvent): StoredRunEvent {
+  append(runId: string, rawEvent: RunEvent): StoredRunEvent {
+    const event = this.redactor ? this.redactor.redactJson(rawEvent) : rawEvent;
     const ts = nowIso();
     const nodeId = 'nodeId' in event ? event.nodeId : null;
     const scope = 'scope' in event ? event.scope : null;
@@ -165,7 +169,8 @@ export class RunStore extends EventEmitter<RunStoreEvents> {
   }
 
   // ---------------------------------------------------------------- transcripts
-  appendTranscript(row: Omit<TranscriptRow, 'seq' | 'ts'>): TranscriptRow {
+  appendTranscript(rawRow: Omit<TranscriptRow, 'seq' | 'ts'>): TranscriptRow {
+    const row = this.redactor ? { ...rawRow, summary: rawRow.summary ? this.redactor.redact(rawRow.summary) : rawRow.summary, payload: this.redactor.redactJson(rawRow.payload) } : rawRow;
     const ts = nowIso();
     const info = this.db
       .prepare('INSERT INTO transcripts (run_id, node_id, scope, ts, kind, summary, payload) VALUES (?, ?, ?, ?, ?, ?, ?)')

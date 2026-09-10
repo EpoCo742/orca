@@ -84,6 +84,7 @@ export const useRuns = create<RunsState>((set, get) => ({
       if (e.type === 'notify') {
         const n = { id: msg.event.seq, runId: msg.runId, title: e.title, message: e.message, level: e.level, ts: msg.event.ts };
         set((s) => ({ notifications: [...s.notifications, n].slice(-20) }));
+        setTimeout(() => get().dismissNotification(n.id), 15_000);
         try {
           if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification(`Orca: ${e.title}`, { body: e.message });
         } catch {

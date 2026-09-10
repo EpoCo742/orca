@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
-import { getNodeType, nodeOutputs, type Diagnostic, type ModelSummary, type NodeBase, type WorkflowDocument } from '@orca/shared';
+import { useEffect, useMemo, useState } from 'react';
+import { getNodeType, nodeOutputs, type Diagnostic, type McpServerConfig, type ModelSummary, type NodeBase, type WorkflowDocument } from '@orca/shared';
 import { useEditor } from '../store/editor.js';
+import type { Api, McpPreset, McpToolInfo } from '../api.js';
 
 export interface InspectorProps {
   document: WorkflowDocument;
@@ -9,6 +10,8 @@ export interface InspectorProps {
   diagnostics: Diagnostic[];
   models: ModelSummary[];
   readOnly: boolean;
+  api?: Api;
+  secretNames?: string[];
 }
 
 export function Inspector(props: InspectorProps) {
@@ -60,7 +63,7 @@ function useReferenceHints(document: WorkflowDocument, node: NodeBase): string[]
 }
 
 // ---------------------------------------------------------------- node inspector
-function NodeInspector({ node, document, diagnostics, models, readOnly }: InspectorProps & { node: NodeBase }) {
+function NodeInspector({ node, document, diagnostics, models, readOnly, api }: InspectorProps & { node: NodeBase }) {
   const def = getNodeType(node.type);
   const editor = useEditor();
   const [idDraft, setIdDraft] = useState(node.id);
@@ -101,6 +104,10 @@ function NodeInspector({ node, document, diagnostics, models, readOnly }: Inspec
       {node.type === 'action.git' && <GitFields node={node} readOnly={readOnly} document={document} />}
       {node.type === 'control.gate' && <GateFields node={node} readOnly={readOnly} />}
       {node.type === 'action.notify' && <NotifyFields node={node} readOnly={readOnly} />}
+      {node.type === 'control.map' && <MapFields node={node} readOnly={readOnly} />}
+      {node.type === 'control.join' && <JoinFields node={node} readOnly={readOnly} />}
+      {node.type === 'workflow.sub' && <SubWorkflowFields node={node} readOnly={readOnly} />}
+      {node.type === 'action.mcp_tool' && <McpToolFields node={node} readOnly={readOnly} document={document} api={api} />}
       {node.type === 'control.condition' && <ConditionFields node={node} readOnly={readOnly} />}
       {node.type === 'control.loop' && <LoopFields node={node} readOnly={readOnly} />}
       {node.type === 'data.transform' && <TransformFields node={node} readOnly={readOnly} />}
@@ -159,6 +166,7 @@ function AgentFields({ node, models, readOnly, document }: { node: NodeBase; mod
     worktreeOf?: string;
     agentMode?: string;
     outputSchema?: Record<string, unknown>;
+    mcpServers?: string[];
   }>(node);
   const approval = cfg.approval ?? {};
   const system = cfg.system ?? { mode: 'preset' as const };
@@ -203,6 +211,20 @@ function AgentFields({ node, models, readOnly, document }: { node: NodeBase; mod
       <Field label="Denied tools (one per line)">
         <TextArea value={(cfg.disallowedTools ?? []).join('\n')} rows={2} disabled={readOnly} onChange={(v) => set({ disallowedTools: v.split('\n').map((s) => s.trim()).filter(Boolean) })} />
       </Field>
+      {Object.keys(document.settings.mcpServers ?? {}).length > 0 && (
+        <Field label="MCP servers attached to this session" hint="Defined under Workflow > MCP servers; allow their tools with Mcp(<server>/<tool>) rules">
+          <div className="hint-list">
+            {Object.keys(document.settings.mcpServers).map((name) => {
+              const on = (cfg.mcpServers ?? []).includes(name);
+              return (
+                <label key={name} className="chip" style={{ cursor: 'pointer' }}>
+                  <input type="checkbox" checked={on} disabled={readOnly} onChange={(e) => set({ mcpServers: e.target.checked ? [...(cfg.mcpServers ?? []), name] : (cfg.mcpServers ?? []).filter((n) => n !== name) })} /> {name}
+                </label>
+              );
+            })}
+          </div>
+        </Field>
+      )}
       <div className="field-row">
         <Field label="Unresolved requests">
           <select value={approval.onUnresolved ?? 'ask'} disabled={readOnly} onChange={(e) => set({ approval: { ...approval, onUnresolved: e.target.value } })}>
@@ -286,6 +308,148 @@ function WorktreeOfField({ value, document, exclude, readOnly, onChange }: { val
         {value && !owners.some((n) => n.id === value) && <option value={value}>{value}</option>}
       </select>
     </Field>
+  );
+}
+
+function MapFields({ node, readOnly }: { node: NodeBase; readOnly: boolean }) {
+  const [cfg, set] = useConfig<{ items?: string; concurrency?: number; failFast?: boolean; continueOnError?: boolean }>(node);
+  return (
+    <>
+      <Field label="Items (expression returning an array)" hint="Each element runs the body once; available inside as item and index">
+        <TextArea value={cfg.items ?? ''} rows={2} disabled={readOnly} onChange={(v) => set({ items: v })} />
+      </Field>
+      <div className="field-row">
+        <Field label="Concurrency">
+          <input type="number" min={1} max={16} value={cfg.concurrency ?? 4} disabled={readOnly} onChange={(e) => set({ concurrency: Number(e.target.value) || 1 })} />
+        </Field>
+        <Field label="Continue on item errors" hint="Failed items appear as { error } in results">
+          <input type="checkbox" checked={cfg.continueOnError ?? true} disabled={readOnly} onChange={(e) => set({ continueOnError: e.target.checked })} />
+        </Field>
+        <Field label="Fail fast">
+          <input type="checkbox" checked={cfg.failFast ?? false} disabled={readOnly} onChange={(e) => set({ failFast: e.target.checked })} />
+        </Field>
+      </div>
+      <div className="note">Agent nodes inside a map with isolation = worktree get one worktree per item (owner key like implement-2).</div>
+    </>
+  );
+}
+
+function JoinFields({ node, readOnly }: { node: NodeBase; readOnly: boolean }) {
+  const [cfg, set] = useConfig<{ mode?: string }>(node);
+  return (
+    <Field label="Mode">
+      <select value={cfg.mode ?? 'all'} disabled={readOnly} onChange={(e) => set({ mode: e.target.value })}>
+        <option value="all">all incoming branches must complete</option>
+        <option value="any">any live branch is enough</option>
+      </select>
+    </Field>
+  );
+}
+
+function SubWorkflowFields({ node, readOnly }: { node: NodeBase; readOnly: boolean }) {
+  const [cfg, set] = useConfig<{ workflowRef?: string; inputs?: Record<string, string>; timeoutMs?: number }>(node);
+  const inputs = cfg.inputs ?? {};
+  return (
+    <>
+      <Field label="Workflow" hint="Registered workflow id, or a .workflow.json path relative to this file">
+        <input value={cfg.workflowRef ?? ''} disabled={readOnly} onChange={(e) => set({ workflowRef: e.target.value })} />
+      </Field>
+      <Field label="Inputs (JSON object of templates)">
+        <TextArea
+          value={JSON.stringify(inputs, null, 2)}
+          rows={4}
+          disabled={readOnly}
+          onChange={(v) => {
+            try {
+              set({ inputs: JSON.parse(v) as Record<string, string> });
+            } catch {
+              /* keep typing */
+            }
+          }}
+        />
+      </Field>
+      <Field label="Timeout (ms)">
+        <input type="number" min={1000} value={cfg.timeoutMs ?? 3_600_000} disabled={readOnly} onChange={(e) => set({ timeoutMs: Number(e.target.value) || 3_600_000 })} />
+      </Field>
+    </>
+  );
+}
+
+function McpToolFields({ node, readOnly, document, api }: { node: NodeBase; readOnly: boolean; document: WorkflowDocument; api?: Api }) {
+  const [cfg, set] = useConfig<{ server?: string; tool?: string; args?: Record<string, unknown>; timeoutMs?: number }>(node);
+  const servers = Object.keys(document.settings.mcpServers ?? {});
+  const [tools, setTools] = useState<McpToolInfo[] | undefined>();
+  const [inspecting, setInspecting] = useState<string | undefined>();
+  const inspect = async () => {
+    if (!api || !cfg.server) return;
+    const config = document.settings.mcpServers[cfg.server];
+    if (!config) return;
+    setInspecting('connecting…');
+    try {
+      const r = await api.mcpInspect(config);
+      setTools(r.tools);
+      setInspecting(r.error ? `error: ${r.error}` : `${r.tools.length} tools`);
+    } catch (e) {
+      setInspecting(`error: ${(e as Error).message}`);
+    }
+  };
+  const selectedTool = tools?.find((t) => t.name === cfg.tool);
+  return (
+    <>
+      <Field label="MCP server" hint="Defined under Workflow > MCP servers">
+        <select value={cfg.server ?? ''} disabled={readOnly} onChange={(e) => set({ server: e.target.value || undefined })}>
+          <option value="">choose…</option>
+          {servers.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <div className="field-row">
+        <Field label="Tool">
+          {tools ? (
+            <select value={cfg.tool ?? ''} disabled={readOnly} onChange={(e) => set({ tool: e.target.value || undefined })}>
+              <option value="">choose…</option>
+              {tools.map((t) => (
+                <option key={t.name} value={t.name}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input value={cfg.tool ?? ''} disabled={readOnly} onChange={(e) => set({ tool: e.target.value })} placeholder="tool name" />
+          )}
+        </Field>
+        <Field label=" ">
+          <button className="btn" disabled={!cfg.server || readOnly} onClick={inspect} title="Connect to the server and list its tools">
+            List tools
+          </button>
+        </Field>
+      </div>
+      {inspecting && <div className="note">{inspecting}</div>}
+      {selectedTool?.description && <div className="note">{selectedTool.description}</div>}
+      {selectedTool?.inputSchema ? (
+        <details className="adv">
+          <summary>Input schema</summary>
+          <pre className="mono small">{JSON.stringify(selectedTool.inputSchema, null, 2)}</pre>
+        </details>
+      ) : null}
+      <Field label="Arguments (JSON; string values are templates)">
+        <TextArea
+          value={JSON.stringify(cfg.args ?? {}, null, 2)}
+          rows={5}
+          disabled={readOnly}
+          onChange={(v) => {
+            try {
+              set({ args: JSON.parse(v) as Record<string, unknown> });
+            } catch {
+              /* keep typing */
+            }
+          }}
+        />
+      </Field>
+    </>
   );
 }
 
@@ -549,7 +713,104 @@ function EdgeInspector({ edge, readOnly }: InspectorProps & { edge: WorkflowDocu
 }
 
 // ---------------------------------------------------------------- workflow inspector
-function WorkflowInspector({ document, diagnostics, models, readOnly }: InspectorProps) {
+function McpServersEditor({ document, readOnly, api, secretNames }: { document: WorkflowDocument; readOnly: boolean; api?: Api; secretNames: string[] }) {
+  const editor = useEditor();
+  const [presets, setPresets] = useState<McpPreset[]>([]);
+  const [presetId, setPresetId] = useState('');
+  const [status, setStatus] = useState<Record<string, string>>({});
+  useEffect(() => {
+    api?.mcpPresets().then(setPresets).catch(() => undefined);
+  }, [api]);
+  const servers = document.settings.mcpServers ?? {};
+  const setServer = (name: string, cfg: McpServerConfig | undefined) =>
+    editor.update((d) => {
+      const next = { ...(d.settings.mcpServers ?? {}) };
+      if (cfg) next[name] = cfg;
+      else delete next[name];
+      d.settings.mcpServers = next;
+    });
+  const addPreset = () => {
+    const p = presets.find((x) => x.id === presetId);
+    if (!p) return;
+    let name = p.id;
+    let i = 2;
+    while (servers[name]) name = `${p.id}${i++}`;
+    setServer(name, p.config);
+    setPresetId('');
+  };
+  const test = async (name: string) => {
+    if (!api) return;
+    setStatus({ ...status, [name]: 'connecting…' });
+    try {
+      const r = await api.mcpInspect(servers[name]!);
+      setStatus({ ...status, [name]: r.error ? `error: ${r.error}` : `ok: ${r.tools.length} tools (${r.tools.slice(0, 5).map((t) => t.name).join(', ')}${r.tools.length > 5 ? ', …' : ''})` });
+    } catch (e) {
+      setStatus({ ...status, [name]: `error: ${(e as Error).message}` });
+    }
+  };
+  const missing = (cfg: McpServerConfig) => {
+    const refs = [...JSON.stringify(cfg).matchAll(/\$\{SECRET:([A-Z][A-Z0-9_]*)\}/g)].map((m) => m[1]!);
+    return refs.filter((r) => !secretNames.includes(r));
+  };
+  return (
+    <>
+      <div className="panel-title">MCP servers ({Object.keys(servers).length})</div>
+      {Object.entries(servers).map(([name, cfg]) => (
+        <details key={name} className="adv">
+          <summary>
+            <code>{name}</code> <span className="note">{cfg.type === 'stdio' ? `${cfg.command} ${cfg.args.join(' ')}` : cfg.url}</span>
+          </summary>
+          {missing(cfg).length > 0 && <div className="diag diag-warning">missing secrets: {missing(cfg).join(', ')} (add them under Secrets in the sidebar)</div>}
+          <TextArea
+            value={JSON.stringify(cfg, null, 2)}
+            rows={6}
+            disabled={readOnly}
+            onChange={(v) => {
+              try {
+                setServer(name, JSON.parse(v) as McpServerConfig);
+              } catch {
+                /* keep typing */
+              }
+            }}
+          />
+          <div className="wt-actions">
+            <button className="btn" onClick={() => test(name)}>
+              Test connection
+            </button>
+            {!readOnly && (
+              <button className="btn btn-danger" onClick={() => setServer(name, undefined)}>
+                Remove
+              </button>
+            )}
+          </div>
+          {status[name] && <div className="note">{status[name]}</div>}
+        </details>
+      ))}
+      {!readOnly && (
+        <div className="field-row">
+          <Field label="Add from preset">
+            <select value={presetId} onChange={(e) => setPresetId(e.target.value)}>
+              <option value="">choose…</option>
+              {presets.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label=" ">
+            <button className="btn" disabled={!presetId} onClick={addPreset}>
+              Add
+            </button>
+          </Field>
+        </div>
+      )}
+      {presetId && <div className="note">{presets.find((p) => p.id === presetId)?.description} {presets.find((p) => p.id === presetId)?.notes}</div>}
+    </>
+  );
+}
+
+function WorkflowInspector({ document, diagnostics, models, readOnly, api, secretNames }: InspectorProps) {
   const editor = useEditor();
   const s = document.settings;
   return (
@@ -591,6 +852,16 @@ function WorkflowInspector({ document, diagnostics, models, readOnly }: Inspecto
           <input type="number" min={1} max={16} value={s.maxConcurrentAgents} disabled={readOnly} onChange={(e) => editor.update((d) => (d.settings.maxConcurrentAgents = Number(e.target.value) || 1))} />
         </Field>
       </div>
+      <details className="adv">
+        <summary>Worktrees</summary>
+        <Field label="Link directories into each worktree (comma separated)" hint="e.g. node_modules, so tests run without reinstalling">
+          <input value={(s.worktree?.linkDirs ?? []).join(', ')} disabled={readOnly} onChange={(e) => editor.update((d) => (d.settings.worktree.linkDirs = e.target.value.split(',').map((x) => x.trim()).filter(Boolean)))} />
+        </Field>
+        <Field label="Setup command (optional)" hint="Runs once inside a fresh worktree">
+          <input value={s.worktree?.setupCommand ?? ''} disabled={readOnly} onChange={(e) => editor.update((d) => (d.settings.worktree.setupCommand = e.target.value || undefined))} />
+        </Field>
+      </details>
+      <McpServersEditor document={document} readOnly={readOnly} api={api} secretNames={secretNames ?? []} />
       <div className="panel-title">Problems ({diagnostics.length})</div>
       <div className="diag-list">
         {diagnostics.length === 0 && <div className="note">No problems.</div>}
