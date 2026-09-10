@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "0d2f3c7a-7c1e-4a0e-9c2b-2f6f3e4f1a01",
+  "name": "Fix until green (fake agent)",
+  "description": "Engine smoke test: runs the sample-target tests in a loop with a fake agent that applies a scripted fix. No model calls.",
+  "inputs": [],
+  "settings": { "repoPath": "../examples/sample-target", "maxConcurrentAgents": 1 },
+  "nodes": [
+    { "id": "start", "type": "trigger.manual", "position": { "x": 40, "y": 200 }, "config": {} },
+    { "id": "reset", "type": "action.shell", "position": { "x": 260, "y": 200 }, "config": { "command": "git checkout -- src/math.js" } },
+    { "id": "loop", "type": "control.loop", "position": { "x": 480, "y": 80 }, "size": { "w": 760, "h": 320 }, "config": { "until": "nodes.test.exit_code === 0", "maxIterations": 5 } },
+    { "id": "test", "type": "action.shell", "position": { "x": 520, "y": 160 }, "parent": "loop", "config": { "command": "npx vitest run" } },
+    { "id": "failing", "type": "control.condition", "position": { "x": 760, "y": 160 }, "parent": "loop", "config": { "expression": "nodes.test.exit_code !== 0" } },
+    { "id": "fix", "type": "agent.copilot", "position": { "x": 1000, "y": 160 }, "parent": "loop", "config": {
+      "adapter": "fake",
+      "prompt": "Iteration {{ iteration.index }}. Tests failed:\n{{ orca.tail(nodes.test.stdout, 20) }}\n@fake:run node -e \"const fs=require('fs');let s=fs.readFileSync('src/math.js','utf8');s=s.replace('return Math.floor(a / b);','if (b === 0) throw new Error(\\\"division by zero\\\"); return a / b;').replace('for (let i = 1;','for (let i = 0;');fs.writeFileSync('src/math.js',s)\"\n@fake:say applied fix" } },
+    { "id": "verdict", "type": "control.condition", "position": { "x": 1300, "y": 200 }, "config": { "expression": "nodes.loop.last.test.exit_code === 0" } },
+    { "id": "summary", "type": "data.transform", "position": { "x": 1540, "y": 200 }, "config": { "code": "return { green: nodes.verdict.value, iterations: nodes.loop.iterations, exitedBy: nodes.loop.exited_by }" } }
+  ],
+  "edges": [
+    { "id": "e1", "from": { "node": "start", "port": "done" }, "to": { "node": "reset", "port": "trigger" } },
+    { "id": "e2", "from": { "node": "reset", "port": "done" }, "to": { "node": "loop", "port": "trigger" } },
+    { "id": "e3", "from": { "node": "test", "port": "done" }, "to": { "node": "failing", "port": "trigger" } },
+    { "id": "e4", "from": { "node": "failing", "port": "true" }, "to": { "node": "fix", "port": "trigger" } },
+    { "id": "e5", "from": { "node": "loop", "port": "done" }, "to": { "node": "verdict", "port": "trigger" } },
+    { "id": "e6", "from": { "node": "verdict", "port": "done" }, "to": { "node": "summary", "port": "trigger" } }
+  ],
+  "ui": { "notes": "Loop body: test -> failing? -> fix. The loop exits when the test node's exit code is 0." }
+}

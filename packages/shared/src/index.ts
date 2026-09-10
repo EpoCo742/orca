@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const ORCA_VERSION = '0.0.0';
+export const ORCA_VERSION = '0.1.0';
 export const API_PREFIX = '/api/v1';
 
 export const HealthResponse = z.object({
@@ -35,3 +35,11 @@ export const ModelsResponse = z.object({
   error: z.string().optional(),
 });
 export type ModelsResponse = z.infer<typeof ModelsResponse>;
+
+export * from './schema/workflow.js';
+export * from './schema/nodes.js';
+export * from './events.js';
+export * from './api.js';
+export * from './template.js';
+
+export * from './projection.js';
