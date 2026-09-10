@@ -13,8 +13,10 @@ export interface RunsState {
   transcripts: Record<string, TranscriptRow[]>; // key `${runId}:${nodeKey}`
   logs: Record<string, NodeLog>; // key `${runId}:${nodeKey}`
   approvals: ApprovalRecord[]; // pending
+  notifications: Array<{ id: number; runId: string; title: string; message: string; level: 'info' | 'success' | 'warning' | 'error'; ts: string }>;
   activeRunId?: string;
   selectedNodeKey?: string; // nodeKey within the active run
+  dismissNotification(id: number): void;
 
   setActiveRun(runId?: string): void;
   loadRun(runId: string, run: RunProjection, workflow: WorkflowDocument, approvals: ApprovalRecord[]): void;
@@ -35,7 +37,11 @@ export const useRuns = create<RunsState>((set, get) => ({
   transcripts: {},
   logs: {},
   approvals: [],
+  notifications: [],
 
+  dismissNotification(id) {
+    set((s) => ({ notifications: s.notifications.filter((n) => n.id !== id) }));
+  },
   setActiveRun(runId) {
     set({ activeRunId: runId, selectedNodeKey: undefined });
   },
@@ -72,7 +78,19 @@ export const useRuns = create<RunsState>((set, get) => ({
     set({ approvals: approvals.filter((a) => a.status === 'pending') });
   },
   handleWs(msg) {
-    if (msg.channel === 'run') get().applyEvents(msg.runId, [msg.event]);
+    if (msg.channel === 'run') {
+      get().applyEvents(msg.runId, [msg.event]);
+      const e = msg.event.event;
+      if (e.type === 'notify') {
+        const n = { id: msg.event.seq, runId: msg.runId, title: e.title, message: e.message, level: e.level, ts: msg.event.ts };
+        set((s) => ({ notifications: [...s.notifications, n].slice(-20) }));
+        try {
+          if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification(`Orca: ${e.title}`, { body: e.message });
+        } catch {
+          /* ignore */
+        }
+      }
+    }
     else if (msg.channel === 'transcript') {
       const k = tkey(msg.runId, msg.row.nodeId, msg.row.scope);
       set((s) => {

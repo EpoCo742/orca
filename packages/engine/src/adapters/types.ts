@@ -8,6 +8,9 @@ export interface AgentRunSpec {
   system: { mode: 'preset'; append?: string } | { mode: 'custom'; text: string };
   model: string;
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  agentMode?: 'interactive' | 'plan' | 'autopilot';
+  /** JSON Schema; when set the adapter exposes a `submit_result` tool and returns `structured`. */
+  outputSchema?: Record<string, unknown>;
   cwd: string;
   env: Record<string, string>;
   maxPremiumRequests: number;
@@ -37,6 +40,7 @@ export type AgentResultSubtype = 'success' | 'error_max_turns' | 'error_max_tool
 export interface AgentResult {
   subtype: AgentResultSubtype;
   text: string;
+  structured?: unknown;
   sessionId?: string;
   cost: CostAmount;
   numTurns: number;

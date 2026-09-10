@@ -6,12 +6,14 @@ import type { ExprContext, ExpressionSandbox } from '../expr/sandbox.js';
 import type { ApprovalBroker } from '../approvals/broker.js';
 import type { AgentAdapter, AdapterId } from '../adapters/types.js';
 import type { RunStore } from './store.js';
+import type { WorktreeManager } from './worktrees.js';
 import type { Logger } from '../logger.js';
 
 export interface EngineServices {
   store: RunStore;
   sandbox: ExpressionSandbox;
   approvals: ApprovalBroker;
+  worktrees: WorktreeManager;
   adapters: Partial<Record<AdapterId, AgentAdapter>>;
   logger: Logger;
   /** Global cap on concurrently running agent sessions across all runs. */

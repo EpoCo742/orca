@@ -135,6 +135,30 @@ export function registerRoutes(engine: Engine, startedAt: number): void {
 
   app.post(`${API_PREFIX}/runs/:id/cancel`, (c) => c.json({ cancelled: runs.cancel(c.req.param('id')) }));
 
+  // ---------------------------------------------------------------- worktrees
+  app.get(`${API_PREFIX}/runs/:id/worktrees`, (c) => c.json({ worktrees: services.worktrees.list(c.req.param('id')) }));
+
+  app.get(`${API_PREFIX}/runs/:id/worktrees/:owner/diff`, async (c) => {
+    const rec = services.worktrees.get(c.req.param('id'), c.req.param('owner'));
+    if (!rec) return c.json({ error: 'no active worktree' }, 404);
+    const base = c.req.query('base') ?? rec.baseRef;
+    return c.json({ worktree: rec, ...(await services.worktrees.diff(rec, base)) });
+  });
+
+  app.post(`${API_PREFIX}/runs/:id/worktrees/:owner/remove`, async (c) => {
+    const rec = services.worktrees.get(c.req.param('id'), c.req.param('owner'));
+    if (!rec) return c.json({ error: 'no active worktree' }, 404);
+    await services.worktrees.remove(rec, { force: true, deleteBranch: true, reason: 'discarded from UI', emit: (e) => services.store.append(rec.runId, e) });
+    return c.json({ removed: true });
+  });
+
+  app.post(`${API_PREFIX}/runs/:id/worktrees/:owner/keep`, (c) => {
+    const rec = services.worktrees.get(c.req.param('id'), c.req.param('owner'));
+    if (!rec) return c.json({ error: 'no active worktree' }, 404);
+    services.worktrees.keep(rec);
+    return c.json({ kept: true });
+  });
+
   // ---------------------------------------------------------------- approvals
   app.get(`${API_PREFIX}/approvals`, (c) => {
     const status = (c.req.query('status') ?? 'pending') as never;

@@ -69,6 +69,18 @@ export const WorkflowSettings = z.object({
   unattended: z.boolean().default(false),
   env: z.record(z.string(), z.string()).default({}),
   secrets: z.array(z.string()).default([]),
+  worktree: z
+    .object({
+      /** `head`: branch from the current HEAD of the main checkout; `default-branch`: from origin's default branch. */
+      baseRef: z.enum(['head', 'default-branch']).default('head'),
+      /** Directory for worktrees, relative to the repo root. */
+      dir: z.string().default('.orca/worktrees'),
+      /** Directories to link (junction/symlink) from the main checkout into each worktree, e.g. node_modules. */
+      linkDirs: z.array(z.string()).default([]),
+      /** Command to run inside a fresh worktree (dependency install). */
+      setupCommand: z.string().optional(),
+    })
+    .prefault({}),
 });
 export type WorkflowSettings = z.infer<typeof WorkflowSettings>;
 

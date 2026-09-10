@@ -11,6 +11,7 @@ import type {
   WorkflowDetail,
   WorkflowDocument,
   WorkflowSummary,
+  WorktreeRecord,
   WsClientMessage,
   WsServerMessage,
 } from '@orca/shared';
@@ -95,6 +96,12 @@ export class Api {
   transcript = (runId: string, nodeId: string, scope: string, after = 0) =>
     this.request<{ rows: TranscriptRow[] }>('GET', `/runs/${runId}/nodes/${nodeId}/transcript?scope=${encodeURIComponent(scope)}&after=${after}`).then((r) => r.rows);
   cancelRun = (id: string) => this.request<{ cancelled: boolean }>('POST', `/runs/${id}/cancel`);
+
+  worktrees = (runId: string) => this.request<{ worktrees: WorktreeRecord[] }>('GET', `/runs/${runId}/worktrees`).then((r) => r.worktrees);
+  worktreeDiff = (runId: string, owner: string) =>
+    this.request<{ worktree: WorktreeRecord; patch: string; stats: { files: number; insertions: number; deletions: number }; files: string[] }>('GET', `/runs/${runId}/worktrees/${owner}/diff`);
+  worktreeRemove = (runId: string, owner: string) => this.request<{ removed: boolean }>('POST', `/runs/${runId}/worktrees/${owner}/remove`);
+  worktreeKeep = (runId: string, owner: string) => this.request<{ kept: boolean }>('POST', `/runs/${runId}/worktrees/${owner}/keep`);
 
   approvals = (status: 'pending' | 'all' = 'pending') => this.request<{ approvals: ApprovalRecord[] }>('GET', `/approvals?status=${status}`).then((r) => r.approvals);
   decide = (id: string, decision: { status: 'approved' | 'rejected'; comment?: string; remember?: 'none' | 'run' | 'workflow' }) =>

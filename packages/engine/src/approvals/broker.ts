@@ -1,4 +1,4 @@
-import type { ApprovalRecord, DecideApprovalRequest, RunEvent, ToolPermissionRequest } from '@orca/shared';
+import type { ApprovalRecord, DecideApprovalRequest, GateRequest, RunEvent, ToolPermissionRequest } from '@orca/shared';
 import type { RunStore } from '../run/store.js';
 
 interface Pending {
@@ -48,6 +48,32 @@ export class ApprovalBroker {
       });
     });
 
+    args.emit({ type: 'approval.decided', approvalId: rec.id, nodeId: args.nodeId, scope: args.scope, status: decided.status });
+    return decided;
+  }
+
+  async requestGate(args: { runId: string; nodeId: string; scope: string; request: GateRequest; timeoutSec?: number; onTimeout: 'reject' | 'approve'; signal: AbortSignal; emit: (event: RunEvent) => void }): Promise<ApprovalRecord> {
+    const timeoutSec = args.timeoutSec ?? 7 * 24 * 3600;
+    const expiresAt = new Date(Date.now() + timeoutSec * 1000).toISOString();
+    const rec = this.store.createApproval({ runId: args.runId, nodeId: args.nodeId, scope: args.scope, kind: 'gate', request: args.request, expiresAt });
+    args.emit({ type: 'approval.requested', approvalId: rec.id, nodeId: args.nodeId, scope: args.scope, kind: 'gate' });
+    const decided = await new Promise<ApprovalRecord>((resolve) => {
+      const timer = setTimeout(
+        () => this.settle(rec.id, this.store.decideApproval(rec.id, 'timeout', { comment: `timed out after ${timeoutSec}s; policy: ${args.onTimeout}` }, 'system')),
+        Math.min(timeoutSec * 1000, 2 ** 31 - 1),
+      );
+      const onAbort = () => this.settle(rec.id, this.store.decideApproval(rec.id, 'rejected', { comment: 'run cancelled' }, 'system'));
+      args.signal.addEventListener('abort', onAbort, { once: true });
+      this.pending.set(rec.id, {
+        runId: args.runId,
+        timer,
+        resolve: (r) => {
+          clearTimeout(timer);
+          args.signal.removeEventListener('abort', onAbort);
+          resolve(r);
+        },
+      });
+    });
     args.emit({ type: 'approval.decided', approvalId: rec.id, nodeId: args.nodeId, scope: args.scope, status: decided.status });
     return decided;
   }

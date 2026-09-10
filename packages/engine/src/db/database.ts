@@ -68,6 +68,19 @@ CREATE TABLE IF NOT EXISTS approvals (
   expires_at TEXT
 );
 CREATE INDEX IF NOT EXISTS approvals_status ON approvals(status, created_at);
+CREATE TABLE IF NOT EXISTS worktrees (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  owner_node_id TEXT NOT NULL,
+  repo_path TEXT NOT NULL,
+  path TEXT NOT NULL,
+  branch TEXT NOT NULL,
+  base_ref TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  removed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS worktrees_run ON worktrees(run_id, owner_node_id);
 `;
 
 export function openDatabase(dbPath: string): Database {

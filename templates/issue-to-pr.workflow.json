@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "id": "9e4f1a2b-3c4d-4e5f-8a6b-7c8d9e0f1a03",
+  "name": "Issue to PR",
+  "description": "Plan -> approve -> implement in an isolated worktree -> test loop -> review -> approve diff -> commit, push, draft PR. Targets a standalone sample repo (pnpm orca sample init ../orca-sample-target --remote <owner>/orca-sample-target).",
+  "inputs": [
+    { "name": "task", "type": "string", "required": true, "default": "The math helpers are buggy: average() ignores the first element, and divide() truncates results and does not reject division by zero. Fix src/math.js so the whole test suite passes without changing the tests.", "description": "The issue or task to implement" }
+  ],
+  "settings": {
+    "repoPath": "../../orca-sample-target",
+    "defaultModel": "claude-sonnet-5",
+    "defaultEffort": "medium",
+    "maxConcurrentAgents": 1,
+    "worktree": { "baseRef": "head", "linkDirs": ["node_modules"] }
+  },
+  "nodes": [
+    { "id": "start", "type": "trigger.manual", "position": { "x": 40, "y": 260 }, "config": { "inputsForm": ["task"] } },
+    { "id": "plan", "type": "agent.copilot", "position": { "x": 260, "y": 260 }, "config": {
+      "prompt": "You are planning a change in this repository. Do not modify any files.\n\nTask:\n{{ inputs.task }}\n\nRead the relevant source and tests, then call submit_result with: summary (2-3 sentences), steps (an ordered list of concrete edits), files (the files you expect to change).",
+      "allowedTools": ["Read", "Shell(npx vitest*)", "Shell(git *)", "Shell(Get-ChildItem*)", "Shell(Get-Content*)", "Shell(ls*)", "Shell(cat*)", "Shell(dir*)", "Shell(type *)"],
+      "disallowedTools": ["Write"],
+      "outputSchema": { "type": "object", "required": ["summary", "steps", "files"], "properties": { "summary": { "type": "string" }, "steps": { "type": "array", "items": { "type": "string" } }, "files": { "type": "array", "items": { "type": "string" } } } },
+      "approval": { "onUnresolved": "deny", "timeoutSec": 300, "autoAllowReadOnly": true },
+      "maxPremiumRequests": 15, "maxToolCalls": 40, "timeoutMs": 300000, "isolation": "none"
+    } },
+    { "id": "approve_plan", "type": "control.gate", "position": { "x": 500, "y": 260 }, "config": {
+      "title": "Approve the plan",
+      "instructions": "The planner proposes the following change. Approve to implement it in an isolated worktree.",
+      "show": [
+        { "label": "Summary", "expression": "nodes.plan.json.summary", "render": "markdown" },
+        { "label": "Steps", "expression": "nodes.plan.json.steps.map((s, i) => (i + 1) + '. ' + s).join('\\n')", "render": "markdown" },
+        { "label": "Files", "expression": "nodes.plan.json.files", "render": "json" }
+      ]
+    } },
+    { "id": "implement", "type": "agent.copilot", "position": { "x": 740, "y": 200 }, "config": {
+      "prompt": "Implement this change in the repository you are in (it is an isolated git worktree; edit freely).\n\nTask:\n{{ inputs.task }}\n\nApproved plan:\n{{ nodes.plan.json.summary }}\n{{ nodes.plan.json.steps.map((s, i) => (i + 1) + '. ' + s).join('\\n') }}\n\nRules: do not modify the tests; keep changes minimal; run the tests with `npx vitest run` before finishing. Reply with one line summarizing what you changed.",
+      "allowedTools": ["Read", "Write", "Shell(npx vitest*)", "Shell(npm test*)", "Shell(node *)", "Shell(git diff*)", "Shell(git status*)", "Shell(Get-ChildItem*)", "Shell(Get-Content*)", "Shell(ls*)", "Shell(cat*)"],
+      "approval": { "onUnresolved": "ask", "timeoutSec": 900, "autoAllowReadOnly": true },
+      "maxPremiumRequests": 25, "maxToolCalls": 80, "timeoutMs": 600000, "isolation": "worktree"
+    } },
+    { "id": "loop", "type": "control.loop", "position": { "x": 1000, "y": 120 }, "size": { "w": 820, "h": 280 }, "config": { "until": "nodes.test.exit_code === 0", "maxIterations": 3 } },
+    { "id": "test", "type": "action.shell", "position": { "x": 30, "y": 80 }, "parent": "loop", "config": { "command": "npx vitest run", "worktreeOf": "implement" } },
+    { "id": "failing", "type": "control.condition", "position": { "x": 300, "y": 80 }, "parent": "loop", "config": { "expression": "nodes.test.exit_code !== 0" } },
+    { "id": "fix", "type": "agent.copilot", "position": { "x": 560, "y": 80 }, "parent": "loop", "config": {
+      "prompt": "The test suite still fails in this worktree. Fix the implementation (not the tests) so every test passes, then reply with one line.\n\n```\n{{ orca.tail(nodes.test.stdout, 60) }}\n{{ orca.tail(nodes.test.stderr, 20) }}\n```",
+      "allowedTools": ["Read", "Write", "Shell(npx vitest*)", "Shell(npm test*)", "Shell(node *)", "Shell(git diff*)", "Shell(git status*)", "Shell(Get-ChildItem*)", "Shell(Get-Content*)", "Shell(ls*)", "Shell(cat*)"],
+      "approval": { "onUnresolved": "ask", "timeoutSec": 900, "autoAllowReadOnly": true },
+      "maxPremiumRequests": 20, "maxToolCalls": 60, "timeoutMs": 600000, "worktreeOf": "implement"
+    } },
+    { "id": "changes", "type": "action.git", "position": { "x": 1880, "y": 260 }, "config": { "op": "diff", "target": "implement" } },
+    { "id": "review", "type": "agent.copilot", "position": { "x": 2100, "y": 260 }, "config": {
+      "prompt": "You are a code reviewer. Review this diff for correctness, regressions, and style. Do not modify files.\n\nTask that was implemented:\n{{ inputs.task }}\n\nDiff:\n```diff\n{{ orca.truncate(nodes.changes.diff, 12000) }}\n```\n\nTests exit code after the change: {{ nodes.loop.last.test.exit_code }}.\n\nCall submit_result with approve (boolean), summary (1-2 sentences), and findings (array of {severity: 'info'|'warning'|'error', file, message}).",
+      "allowedTools": ["Read", "Shell(git diff*)", "Shell(git log*)", "Shell(npx vitest*)", "Shell(Get-ChildItem*)", "Shell(Get-Content*)", "Shell(ls*)", "Shell(cat*)"],
+      "disallowedTools": ["Write"],
+      "outputSchema": { "type": "object", "required": ["approve", "summary", "findings"], "properties": { "approve": { "type": "boolean" }, "summary": { "type": "string" }, "findings": { "type": "array", "items": { "type": "object", "required": ["severity", "message"], "properties": { "severity": { "type": "string", "enum": ["info", "warning", "error"] }, "file": { "type": "string" }, "message": { "type": "string" } } } } } },
+      "approval": { "onUnresolved": "deny", "timeoutSec": 300, "autoAllowReadOnly": true },
+      "maxPremiumRequests": 15, "maxToolCalls": 40, "timeoutMs": 300000, "worktreeOf": "implement"
+    } },
+    { "id": "approve_diff", "type": "control.gate", "position": { "x": 2340, "y": 260 }, "config": {
+      "title": "Approve the change",
+      "instructions": "Review the diff and the reviewer's findings. Approve to commit, push, and open a draft PR; reject to discard the worktree.",
+      "show": [
+        { "label": "Reviewer verdict", "expression": "(nodes.review.json.approve ? 'APPROVE' : 'REQUEST CHANGES') + ': ' + nodes.review.json.summary", "render": "markdown" },
+        { "label": "Findings", "expression": "nodes.review.json.findings", "render": "json" },
+        { "label": "Tests", "expression": "'exit code ' + nodes.loop.last.test.exit_code + ' after ' + nodes.loop.iterations + ' iteration(s)'", "render": "text" },
+        { "label": "Diff", "expression": "nodes.changes.diff", "render": "diff" }
+      ]
+    } },
+    { "id": "commit", "type": "action.git", "position": { "x": 2580, "y": 180 }, "config": { "op": "commit", "target": "implement", "message": "{{ orca.truncate(inputs.task, 60) }}\n\nImplemented by Orca (Issue to PR workflow, run {{ run.id }})." } },
+    { "id": "push", "type": "action.git", "position": { "x": 2800, "y": 180 }, "config": { "op": "push", "target": "implement" } },
+    { "id": "pr", "type": "action.git", "position": { "x": 3020, "y": 180 }, "config": { "op": "pr.create", "target": "implement", "draft": true, "title": "{{ orca.truncate(inputs.task, 70) }}", "body": "## Summary\n{{ nodes.review.json.summary }}\n\n## Plan\n{{ nodes.plan.json.steps.map((s, i) => (i + 1) + '. ' + s).join('\\n') }}\n\n## Review findings\n{{ orca.json(nodes.review.json.findings) }}\n\nOpened by Orca run {{ run.id }}." } },
+    { "id": "done", "type": "action.notify", "position": { "x": 3240, "y": 180 }, "config": { "title": "Draft PR opened", "message": "{{ nodes.pr.pr_url }}", "level": "success" } },
+    { "id": "discard", "type": "action.git", "position": { "x": 2580, "y": 360 }, "config": { "op": "worktree.remove", "target": "implement" } },
+    { "id": "rejected", "type": "action.notify", "position": { "x": 2800, "y": 360 }, "config": { "title": "Change rejected", "message": "Worktree discarded. Comment: {{ nodes.approve_diff.comment }}", "level": "warning" } },
+    { "id": "plan_rejected", "type": "action.notify", "position": { "x": 740, "y": 420 }, "config": { "title": "Plan rejected", "message": "{{ nodes.approve_plan.comment }}", "level": "warning" } }
+  ],
+  "edges": [
+    { "id": "e1", "from": { "node": "start", "port": "done" }, "to": { "node": "plan", "port": "trigger" } },
+    { "id": "e2", "from": { "node": "plan", "port": "done" }, "to": { "node": "approve_plan", "port": "trigger" } },
+    { "id": "e3", "from": { "node": "approve_plan", "port": "approved" }, "to": { "node": "implement", "port": "trigger" } },
+    { "id": "e3b", "from": { "node": "approve_plan", "port": "rejected" }, "to": { "node": "plan_rejected", "port": "trigger" } },
+    { "id": "e4", "from": { "node": "implement", "port": "done" }, "to": { "node": "loop", "port": "trigger" } },
+    { "id": "e5", "from": { "node": "test", "port": "done" }, "to": { "node": "failing", "port": "trigger" } },
+    { "id": "e6", "from": { "node": "failing", "port": "true" }, "to": { "node": "fix", "port": "trigger" } },
+    { "id": "e7", "from": { "node": "loop", "port": "done" }, "to": { "node": "changes", "port": "trigger" } },
+    { "id": "e8", "from": { "node": "changes", "port": "done" }, "to": { "node": "review", "port": "trigger" } },
+    { "id": "e9", "from": { "node": "review", "port": "done" }, "to": { "node": "approve_diff", "port": "trigger" } },
+    { "id": "e10", "from": { "node": "approve_diff", "port": "approved" }, "to": { "node": "commit", "port": "trigger" } },
+    { "id": "e11", "from": { "node": "commit", "port": "done" }, "to": { "node": "push", "port": "trigger" } },
+    { "id": "e12", "from": { "node": "push", "port": "done" }, "to": { "node": "pr", "port": "trigger" } },
+    { "id": "e13", "from": { "node": "pr", "port": "done" }, "to": { "node": "done", "port": "trigger" } },
+    { "id": "e14", "from": { "node": "approve_diff", "port": "rejected" }, "to": { "node": "discard", "port": "trigger" } },
+    { "id": "e15", "from": { "node": "discard", "port": "done" }, "to": { "node": "rejected", "port": "trigger" } }
+  ],
+  "ui": { "notes": "Two human gates: plan and diff. Everything after the plan runs in a git worktree owned by the implement node." }
+}

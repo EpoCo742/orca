@@ -11,20 +11,21 @@ export const agentExecutor: NodeExecutor<AgentCopilotConfig> = {
     const adapter = ctx.services.adapters[cfg.adapter];
     if (!adapter) throw new NodeExecError(`agent adapter "${cfg.adapter}" is not available`);
     const settings = ctx.workflow.settings;
+    const nodeId = ctx.node.node.id;
     const spec: AgentRunSpec = {
       prompt: cfg.prompt,
       system: cfg.system,
       model: cfg.model ?? settings.defaultModel,
       effort: cfg.effort ?? settings.defaultEffort,
+      agentMode: cfg.agentMode,
+      outputSchema: cfg.outputSchema,
       cwd: ctx.cwd,
       env: { ...ctx.exprCtx.env, ...cfg.env },
       maxPremiumRequests: cfg.maxPremiumRequests,
       maxToolCalls: cfg.maxToolCalls,
       timeoutMs: cfg.timeoutMs,
     };
-    const allowRules = parseRules([...cfg.allowedTools, ...ctx.runAllowRules]);
     const denyRules = parseRules(cfg.disallowedTools);
-    const { nodeId } = ctx.node.node.id ? { nodeId: ctx.node.node.id } : { nodeId: '' };
 
     const hooks: AdapterHooks = {
       onEvent: (kind, payload, summary) => ctx.transcript(kind, payload, summary),
@@ -34,7 +35,7 @@ export const agentExecutor: NodeExecutor<AgentCopilotConfig> = {
       onPermission: async (query: PermissionQuery, raw: unknown): Promise<PermissionDecision> => {
         // Re-parse each time so "allow for this run" rules added mid-session take effect.
         const rules = parseRules([...cfg.allowedTools, ...ctx.runAllowRules]);
-        const policy = evaluatePolicy(query, rules.length ? rules : allowRules, denyRules, { autoAllowReadOnly: cfg.approval.autoAllowReadOnly, onUnresolved: cfg.approval.onUnresolved });
+        const policy = evaluatePolicy(query, rules, denyRules, { autoAllowReadOnly: cfg.approval.autoAllowReadOnly, onUnresolved: cfg.approval.onUnresolved });
         ctx.transcript('orca.permission', { query, policy }, `${policy.decision}: ${policy.reason}`);
         if (policy.decision === 'allow') return { allow: true, reason: policy.reason };
         if (policy.decision === 'deny') return { allow: false, reason: policy.reason };
@@ -71,17 +72,29 @@ export const agentExecutor: NodeExecutor<AgentCopilotConfig> = {
 
     const result = await adapter.run(spec, hooks, ctx.signal);
     if (ctx.signal.aborted) throw new NodeExecError('cancelled', 'cancelled');
-    const outputs = {
+
+    const filesChanged = await ctx.services.worktrees.changedFiles(ctx.cwd).catch(() => [] as string[]);
+    const structured = result.structured;
+    const outputs: Record<string, unknown> = {
       text: result.text,
+      json: structured ?? null,
+      files_changed: filesChanged,
       cost: result.cost,
       session_id: result.sessionId ?? '',
       num_turns: result.numTurns,
       tool_calls: result.toolCalls,
       result_subtype: result.subtype,
     };
+    if (structured && typeof structured === 'object') {
+      const s = structured as Record<string, unknown>;
+      if (typeof s.score === 'number') outputs.score = s.score;
+      if (typeof s.verdict === 'string') outputs.verdict = s.verdict;
+      if (typeof s.approve === 'boolean') outputs.approve = s.approve;
+    }
     if (result.subtype === 'error_during_execution') throw new NodeExecError(result.error ?? 'agent failed', 'error');
     if (result.subtype === 'error_timeout') throw new NodeExecError(result.error ?? 'agent timed out', 'timeout');
     if (result.subtype === 'error_max_turns' || result.subtype === 'error_max_tool_calls') throw new NodeExecError(result.error ?? `agent hit its cap (${result.subtype})`, 'budget');
+    if (cfg.outputSchema && structured === undefined) throw new NodeExecError('agent finished without calling submit_result', 'schema_invalid');
     return { outputs };
   },
 };

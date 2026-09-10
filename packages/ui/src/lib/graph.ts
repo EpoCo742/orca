@@ -32,6 +32,12 @@ export function subtitleFor(node: NodeBase): string {
       return `${String(c.model ?? 'default model')} · ${String(c.prompt ?? '').slice(0, 60)}`;
     case 'data.transform':
       return String(c.code ?? '').split('\n')[0] ?? '';
+    case 'action.git':
+      return `${String(c.op ?? '')} → ${String(c.target ?? '?')}`;
+    case 'control.gate':
+      return String(c.title ?? '');
+    case 'action.notify':
+      return `${String(c.channel ?? 'desktop')}: ${String(c.title ?? '')}`;
     default:
       return '';
   }

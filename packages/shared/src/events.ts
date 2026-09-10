@@ -33,7 +33,10 @@ export type RunEvent =
   | { type: 'approval.requested'; approvalId: string; nodeId: string; scope: ScopePath; kind: ApprovalKind }
   | { type: 'approval.decided'; approvalId: string; nodeId: string; scope: ScopePath; status: ApprovalStatus }
   | { type: 'agent.session'; nodeId: string; scope: ScopePath; sessionId: string }
-  | { type: 'agent.cost'; nodeId: string; scope: ScopePath; cost: CostAmount };
+  | { type: 'agent.cost'; nodeId: string; scope: ScopePath; cost: CostAmount }
+  | { type: 'worktree.created'; nodeId: string; scope: ScopePath; ownerNodeId: string; path: string; branch: string }
+  | { type: 'worktree.removed'; nodeId: string; scope: ScopePath; ownerNodeId: string; path: string; reason: string }
+  | { type: 'notify'; nodeId: string; scope: ScopePath; title: string; message: string; level: 'info' | 'success' | 'warning' | 'error' };
 
 export type RunEventType = RunEvent['type'];
 
@@ -58,6 +61,32 @@ export interface ToolPermissionRequest {
   raw: unknown;
 }
 
+export interface GateShowRendered {
+  label: string;
+  render: 'text' | 'markdown' | 'json' | 'diff';
+  value: unknown;
+}
+
+export interface GateRequest {
+  kind: 'gate';
+  title: string;
+  instructions: string;
+  items: GateShowRendered[];
+}
+
+export interface WorktreeRecord {
+  id: string;
+  runId: string;
+  ownerNodeId: string;
+  repoPath: string;
+  path: string;
+  branch: string;
+  baseRef: string;
+  status: 'active' | 'kept' | 'removed';
+  createdAt: string;
+  removedAt?: string;
+}
+
 export interface ApprovalRecord {
   id: string;
   runId: string;
@@ -65,7 +94,7 @@ export interface ApprovalRecord {
   scope: ScopePath;
   kind: ApprovalKind;
   status: ApprovalStatus;
-  request: ToolPermissionRequest | { kind: 'gate'; title: string; body: string };
+  request: ToolPermissionRequest | GateRequest;
   response?: { comment?: string; remember?: 'none' | 'run' | 'workflow' };
   createdAt: string;
   decidedAt?: string;

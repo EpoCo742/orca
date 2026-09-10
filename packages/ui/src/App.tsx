@@ -231,6 +231,14 @@ function Shell({ api }: { api: Api }) {
         </div>
       )}
       <ApprovalsPanel api={api} approvals={runs.approvals} onOpenRun={openRun} />
+      <div className="toasts">
+        {runs.notifications.slice(-4).map((n) => (
+          <div key={n.id} className={`toast toast-${n.level}`} onClick={() => runs.dismissNotification(n.id)} title="click to dismiss">
+            <b>{n.title}</b>
+            {n.message}
+          </div>
+        ))}
+      </div>
       <div className="body">
         <aside className="sidebar">
           <div className="panel-title">Workflows</div>

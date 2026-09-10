@@ -288,8 +288,23 @@ export class RunExecution {
 
     const executor = this.deps.executors.get(pn.def.type);
     if (!executor) throw new NodeExecError(`no executor for node type ${pn.def.type}`);
-    const cwdRelative = (config as { cwdRelative?: string }).cwdRelative;
-    const cwd = cwdRelative ? path.resolve(this.repoPath, cwdRelative) : this.repoPath;
+    const cfgAny = config as { cwdRelative?: string; worktreeOf?: string; isolation?: string };
+    const worktreeOwner = cfgAny.worktreeOf ?? (pn.def.category === 'agent' && cfgAny.isolation === 'worktree' ? nodeId : undefined);
+    let baseDir = this.repoPath;
+    if (worktreeOwner) {
+      const rec = await this.services.worktrees.ensure({
+        runId: this.runId,
+        ownerNodeId: worktreeOwner,
+        repoPath: this.repoPath,
+        workflowSlug: slugify(this.deps.workflow.name),
+        settings: this.deps.workflow.settings.worktree,
+        emit: (e) => this.emit(e),
+        nodeId,
+        scope,
+      });
+      baseDir = rec.path;
+    }
+    const cwd = cfgAny.cwdRelative ? path.resolve(baseDir, cfgAny.cwdRelative) : baseDir;
     const ctx: ExecContext = {
       runId: this.runId,
       workflow: this.deps.workflow,
@@ -398,4 +413,14 @@ export class RunExecution {
 
 function redactConfig(config: unknown): unknown {
   return config;
+}
+
+function slugify(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'workflow'
+  );
 }

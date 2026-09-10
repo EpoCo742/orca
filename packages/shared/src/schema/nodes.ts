@@ -35,6 +35,8 @@ export const ShellConfig = z.object({
   command: z.string().min(1),
   shell: z.enum(['auto', 'bash', 'powershell', 'cmd', 'sh']).default('auto'),
   cwdRelative: z.string().optional(),
+  /** Run inside the worktree owned by this node id (created on first use). */
+  worktreeOf: NodeId.optional(),
   env: z.record(z.string(), z.string()).default({}),
   timeoutMs: z.number().int().positive().default(600_000),
   failOnNonZero: z.boolean().default(false),
@@ -84,6 +86,15 @@ export const AgentCopilotConfig = z.object({
   system: AgentSystemConfig.prefault({ mode: 'preset' }),
   model: z.string().optional(),
   effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
+  /** Copilot agent mode. `plan` explores and writes a plan without editing files. */
+  agentMode: z.enum(['interactive', 'plan', 'autopilot']).default('interactive'),
+  /**
+   * JSON Schema for a structured result. When set, the agent gets a `submit_result` tool and the `json` output
+   * port carries the validated result; a Judge node is an agent with this set.
+   */
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
+  /** Run inside another node's worktree instead of the repo root (or this node's own worktree). */
+  worktreeOf: NodeId.optional(),
   /**
    * Orca permission rules. Forms: `Read`, `Write`, `Shell(<glob>)`, `Mcp(<server>/<tool-glob>)`, `Url(<glob>)`.
    * A bare `Shell` allows every shell command. Rules are matched against Copilot permission requests.
@@ -99,6 +110,50 @@ export const AgentCopilotConfig = z.object({
   env: z.record(z.string(), z.string()).default({}),
 });
 export type AgentCopilotConfig = z.infer<typeof AgentCopilotConfig>;
+
+// ---------------------------------------------------------------- action.git
+export const GitConfig = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('diff'), target: NodeId, base: z.string().optional() }),
+  z.object({ op: z.literal('commit'), target: NodeId, message: z.string().min(1), addAll: z.boolean().default(true), allowEmpty: z.boolean().default(false) }),
+  z.object({ op: z.literal('push'), target: NodeId, remote: z.string().default('origin'), setUpstream: z.boolean().default(true) }),
+  z.object({
+    op: z.literal('pr.create'),
+    target: NodeId,
+    title: z.string().min(1),
+    body: z.string().default(''),
+    base: z.string().optional(),
+    draft: z.boolean().default(true),
+  }),
+  z.object({ op: z.literal('worktree.remove'), target: NodeId, force: z.boolean().default(true), deleteBranch: z.boolean().default(true) }),
+  z.object({ op: z.literal('worktree.keep'), target: NodeId }),
+]);
+export type GitConfig = z.infer<typeof GitConfig>;
+
+// ---------------------------------------------------------------- control.gate
+export const GateShowItem = z.object({
+  label: z.string(),
+  /** Expression producing the value to show. */
+  expression: z.string().min(1),
+  render: z.enum(['text', 'markdown', 'json', 'diff']).default('markdown'),
+});
+export const GateConfig = z.object({
+  title: z.string().min(1),
+  instructions: z.string().default(''),
+  show: z.array(GateShowItem).default([]),
+  timeoutSec: z.number().int().positive().optional(),
+  onTimeout: z.enum(['reject', 'approve']).default('reject'),
+});
+export type GateConfig = z.infer<typeof GateConfig>;
+
+// ---------------------------------------------------------------- action.notify
+export const NotifyConfig = z.object({
+  channel: z.enum(['desktop', 'webhook']).default('desktop'),
+  title: z.string().min(1),
+  message: z.string().default(''),
+  url: z.string().optional(),
+  level: z.enum(['info', 'success', 'warning', 'error']).default('info'),
+});
+export type NotifyConfig = z.infer<typeof NotifyConfig>;
 
 // ---------------------------------------------------------------- registry
 export const NODE_TYPES: Record<string, NodeTypeDef> = {
@@ -119,6 +174,8 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
     inputs: [{ id: 'context', type: 'any', label: 'Context' }],
     outputs: [
       { id: 'text', type: 'string', label: 'Final message' },
+      { id: 'json', type: 'json', label: 'Structured result' },
+      { id: 'files_changed', type: 'json', label: 'Files changed' },
       { id: 'cost', type: 'json', label: 'Cost' },
       { id: 'session_id', type: 'string', label: 'Session id' },
       { id: 'num_turns', type: 'number', label: 'Model calls' },
@@ -169,6 +226,50 @@ export const NODE_TYPES: Record<string, NodeTypeDef> = {
     ],
     config: LoopConfig,
     container: 'loop',
+  },
+  'action.git': {
+    type: 'action.git',
+    category: 'action',
+    label: 'Git',
+    description: 'Diff, commit, push, open a draft PR, or discard the worktree of an agent node.',
+    inputs: [],
+    outputs: [
+      { id: 'diff', type: 'string', label: 'Diff' },
+      { id: 'files', type: 'json', label: 'Files' },
+      { id: 'stats', type: 'json', label: 'Stats' },
+      { id: 'branch', type: 'string', label: 'Branch' },
+      { id: 'commit', type: 'string', label: 'Commit' },
+      { id: 'pr_url', type: 'string', label: 'PR URL' },
+      { id: 'worktree_path', type: 'string', label: 'Worktree path' },
+    ],
+    config: GitConfig,
+    templateFields: ['message', 'title', 'body'],
+  },
+  'control.gate': {
+    type: 'control.gate',
+    category: 'control',
+    label: 'Approval gate',
+    description: 'Pauses the run until a person approves or rejects, showing plans, diffs, or findings.',
+    inputs: [],
+    outputs: [
+      { id: 'approved', type: 'trigger', label: 'Approved' },
+      { id: 'rejected', type: 'trigger', label: 'Rejected' },
+      { id: 'decision', type: 'string', label: 'Decision' },
+      { id: 'comment', type: 'string', label: 'Comment' },
+      { id: 'decided_by', type: 'string', label: 'Decided by' },
+    ],
+    config: GateConfig,
+    templateFields: ['title', 'instructions'],
+  },
+  'action.notify': {
+    type: 'action.notify',
+    category: 'action',
+    label: 'Notify',
+    description: 'Desktop notification in the Orca UI, or a webhook POST.',
+    inputs: [],
+    outputs: [{ id: 'delivered', type: 'boolean', label: 'Delivered' }],
+    config: NotifyConfig,
+    templateFields: ['title', 'message', 'url'],
   },
   'data.transform': {
     type: 'data.transform',

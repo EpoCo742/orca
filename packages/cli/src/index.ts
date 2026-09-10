@@ -14,6 +14,8 @@ const repoRoot = path.resolve(here, '..', '..', '..');
 const uiDir = path.resolve(repoRoot, 'packages', 'ui');
 const templatesDir = path.resolve(repoRoot, 'templates');
 const require = createRequire(import.meta.url);
+// pnpm runs scripts with cwd = the package dir; INIT_CWD is where the user actually invoked the command.
+const invokedCwd = process.env.INIT_CWD ?? process.cwd();
 
 const program = new Command();
 program.name('orca').description('Orca: visual orchestration for coding agents').version(ORCA_VERSION);
@@ -24,7 +26,7 @@ async function makeEngine(opts: { port: number; token: string; corsOrigins?: str
     port: opts.port,
     authToken: opts.token,
     corsOrigins: opts.corsOrigins,
-    workingDirectory: process.cwd(),
+    workingDirectory: invokedCwd,
     templatesDir,
     disableCopilot: opts.disableCopilot,
   });
@@ -98,7 +100,7 @@ program
       const i = kv.indexOf('=');
       if (i > 0) inputs[kv.slice(0, i)] = parseValue(kv.slice(i + 1));
     }
-    const detail = workflow.endsWith('.json') ? engine.workflows.importFile(workflow) : engine.workflows.importTemplate(workflow);
+    const detail = workflow.endsWith('.json') ? engine.workflows.importFile(path.resolve(invokedCwd, workflow)) : engine.workflows.importTemplate(workflow);
     const errors = detail.diagnostics.filter((d) => d.severity === 'error');
     if (errors.length) {
       for (const e of errors) console.error(`error: ${e.message}`);
@@ -126,6 +128,43 @@ program
     }
     await engine.stop();
     process.exit(p.status === 'completed' ? 0 : 1);
+  });
+
+const sample = program.command('sample').description('Sample target repositories for trying workflows');
+
+sample
+  .command('init')
+  .description('Create a standalone copy of examples/sample-target as its own git repo (optionally pushed to GitHub)')
+  .argument('<dir>', 'directory to create, e.g. ../orca-sample-target')
+  .option('--remote <owner/name>', 'create a private GitHub repo with gh and push')
+  .option('--force', 'overwrite an existing directory')
+  .action(async (dir: string, opts: { remote?: string; force?: boolean }) => {
+    const fs = await import('node:fs');
+    const src = path.resolve(repoRoot, 'examples', 'sample-target');
+    const dst = path.resolve(invokedCwd, dir);
+    if (fs.existsSync(dst)) {
+      if (!opts.force) {
+        console.error(`${dst} already exists (use --force to overwrite)`);
+        process.exit(2);
+      }
+      fs.rmSync(dst, { recursive: true, force: true });
+    }
+    fs.mkdirSync(dst, { recursive: true });
+    for (const entry of fs.readdirSync(src)) {
+      if (entry === 'node_modules') continue;
+      fs.cpSync(path.join(src, entry), path.join(dst, entry), { recursive: true });
+    }
+    fs.writeFileSync(path.join(dst, '.gitignore'), 'node_modules/\n.orca/worktrees/\n');
+    const run = (file: string, args: string[]) => execa(file, args, { cwd: dst, stdio: 'inherit', windowsHide: true });
+    await run('git', ['init', '-b', 'main']);
+    await run('git', ['add', '-A']);
+    await run('git', ['commit', '-q', '-m', 'Initial sample target with intentional bugs']);
+    console.log('installing test dependencies (npm install)...');
+    await run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error']);
+    if (opts.remote) {
+      await run('gh', ['repo', 'create', opts.remote, '--private', '--source', '.', '--remote', 'origin', '--push', '--description', 'Orca sample target repository']);
+    }
+    console.log(`sample repo ready at ${dst}`);
   });
 
 const auth = program.command('auth').description('GitHub Copilot authentication');

@@ -8,6 +8,8 @@ import type { AgentAdapter, AgentResult, AgentRunSpec, AdapterHooks } from './ty
  *   @fake:slow <ms>                     -> waits
  *   @fake:say <text>                    -> final text (default "fake result")
  *   @fake:run <cmd>                     -> executes the command via node child_process in cwd (used by fix-until-green-fake)
+ *   @fake:result <json>                 -> structured result (as if submit_result was called)
+ *   @fake:write <file> <text>           -> writes a file in cwd (\n escapes allowed)
  */
 export class FakeAdapter implements AgentAdapter {
   id = 'fake' as const;
@@ -19,6 +21,7 @@ export class FakeAdapter implements AgentAdapter {
     hooks.onEvent('session.start', { sessionId, model: spec.model });
     hooks.onEvent('user.message', { content: spec.prompt });
     let text = 'fake result';
+    let structured: unknown = undefined;
     let toolCalls = 0;
     let turns = 1;
     for (const line of spec.prompt.split(/\r?\n/)) {
@@ -29,6 +32,22 @@ export class FakeAdapter implements AgentAdapter {
       if (cmd === 'slow') await new Promise((r) => setTimeout(r, Number(arg) || 100));
       if (cmd === 'fail') throw new Error('fake failure');
       if (cmd === 'say') text = arg;
+      if (cmd === 'result') {
+        try {
+          structured = JSON.parse(arg) as unknown;
+        } catch {
+          structured = arg;
+        }
+        hooks.onEvent('tool.execution_start', { toolName: 'submit_result', arguments: structured }, 'submit_result');
+      }
+      if (cmd === 'write') {
+        const [file, ...rest] = arg.split(/\s+/);
+        const fs = await import('node:fs');
+        const path = await import('node:path');
+        if (file) fs.writeFileSync(path.resolve(spec.cwd, file), rest.join(' ').replace(/\\n/g, '\n') + '\n');
+        toolCalls++;
+        hooks.onEvent('tool.execution_start', { toolName: 'write', arguments: { file } }, `write ${file}`);
+      }
       if (cmd === 'permission') {
         const [kind, ...rest] = arg.split(/\s+/);
         const subject = rest.join(' ');
@@ -49,6 +68,6 @@ export class FakeAdapter implements AgentAdapter {
     }
     hooks.onEvent('assistant.message', { content: text });
     hooks.onCost({ unit: 'premium_requests', amount: 1 });
-    return { subtype: 'success', text, sessionId, cost: { unit: 'premium_requests', amount: turns }, numTurns: turns, toolCalls, durationMs: Date.now() - started };
+    return { subtype: 'success', text, structured, sessionId, cost: { unit: 'premium_requests', amount: turns }, numTurns: turns, toolCalls, durationMs: Date.now() - started };
   }
 }

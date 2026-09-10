@@ -97,7 +97,10 @@ function NodeInspector({ node, document, diagnostics, models, readOnly }: Inspec
       </Field>
 
       {node.type === 'agent.copilot' && <AgentFields node={node} models={models} readOnly={readOnly} document={document} />}
-      {node.type === 'action.shell' && <ShellFields node={node} readOnly={readOnly} />}
+      {node.type === 'action.shell' && <ShellFields node={node} readOnly={readOnly} document={document} />}
+      {node.type === 'action.git' && <GitFields node={node} readOnly={readOnly} document={document} />}
+      {node.type === 'control.gate' && <GateFields node={node} readOnly={readOnly} />}
+      {node.type === 'action.notify' && <NotifyFields node={node} readOnly={readOnly} />}
       {node.type === 'control.condition' && <ConditionFields node={node} readOnly={readOnly} />}
       {node.type === 'control.loop' && <LoopFields node={node} readOnly={readOnly} />}
       {node.type === 'data.transform' && <TransformFields node={node} readOnly={readOnly} />}
@@ -152,6 +155,10 @@ function AgentFields({ node, models, readOnly, document }: { node: NodeBase; mod
     maxToolCalls?: number;
     timeoutMs?: number;
     cwdRelative?: string;
+    isolation?: string;
+    worktreeOf?: string;
+    agentMode?: string;
+    outputSchema?: Record<string, unknown>;
   }>(node);
   const approval = cfg.approval ?? {};
   const system = cfg.system ?? { mode: 'preset' as const };
@@ -230,17 +237,229 @@ function AgentFields({ node, models, readOnly, document }: { node: NodeBase; mod
       <Field label="Working directory (relative to repo)">
         <input value={cfg.cwdRelative ?? ''} disabled={readOnly} onChange={(e) => set({ cwdRelative: e.target.value || undefined })} />
       </Field>
+      <div className="field-row">
+        <Field label="Isolation" hint="worktree: edits happen in a git worktree owned by this node">
+          <select value={cfg.isolation ?? 'none'} disabled={readOnly} onChange={(e) => set({ isolation: e.target.value })}>
+            <option value="none">none (repo root)</option>
+            <option value="worktree">git worktree</option>
+          </select>
+        </Field>
+        <WorktreeOfField value={cfg.worktreeOf} document={document} exclude={node.id} readOnly={readOnly} onChange={(v) => set({ worktreeOf: v })} />
+      </div>
+      <Field label="Agent mode">
+        <select value={cfg.agentMode ?? 'interactive'} disabled={readOnly} onChange={(e) => set({ agentMode: e.target.value })}>
+          <option value="interactive">interactive (default)</option>
+          <option value="plan">plan (explore, do not edit)</option>
+          <option value="autopilot">autopilot</option>
+        </select>
+      </Field>
+      <Field label="Structured result schema (JSON Schema, optional)" hint="When set, the agent must call submit_result; the result appears on the json port (Judge pattern)">
+        <TextArea
+          value={cfg.outputSchema ? JSON.stringify(cfg.outputSchema, null, 2) : ''}
+          rows={4}
+          disabled={readOnly}
+          onChange={(v) => {
+            if (!v.trim()) return set({ outputSchema: undefined });
+            try {
+              set({ outputSchema: JSON.parse(v) as Record<string, unknown> });
+            } catch {
+              /* keep typing */
+            }
+          }}
+        />
+      </Field>
     </>
   );
 }
 
-function ShellFields({ node, readOnly }: { node: NodeBase; readOnly: boolean }) {
-  const [cfg, set] = useConfig<{ command?: string; shell?: string; cwdRelative?: string; timeoutMs?: number; failOnNonZero?: boolean }>(node);
+function WorktreeOfField({ value, document, exclude, readOnly, onChange }: { value?: string; document: WorkflowDocument; exclude: string; readOnly: boolean; onChange(v: string | undefined): void }) {
+  const owners = document.nodes.filter((n) => n.id !== exclude && n.type === 'agent.copilot' && (n.config as { isolation?: string } | undefined)?.isolation === 'worktree');
+  return (
+    <Field label="Run in worktree of" hint="Use another agent node's worktree (created on first use)">
+      <select value={value ?? ''} disabled={readOnly} onChange={(e) => onChange(e.target.value || undefined)}>
+        <option value="">repo root</option>
+        {owners.map((n) => (
+          <option key={n.id} value={n.id}>
+            {n.id}
+          </option>
+        ))}
+        {value && !owners.some((n) => n.id === value) && <option value={value}>{value}</option>}
+      </select>
+    </Field>
+  );
+}
+
+function GitFields({ node, readOnly, document }: { node: NodeBase; readOnly: boolean; document: WorkflowDocument }) {
+  const [cfg, set] = useConfig<{ op?: string; target?: string; base?: string; message?: string; addAll?: boolean; remote?: string; title?: string; body?: string; draft?: boolean; force?: boolean; deleteBranch?: boolean }>(node);
+  const owners = document.nodes.filter((n) => n.id !== node.id && n.type === 'agent.copilot' && (n.config as { isolation?: string } | undefined)?.isolation === 'worktree');
+  const op = cfg.op ?? 'diff';
+  return (
+    <>
+      <div className="field-row">
+        <Field label="Operation">
+          <select value={op} disabled={readOnly} onChange={(e) => set({ op: e.target.value })}>
+            {['diff', 'commit', 'push', 'pr.create', 'worktree.remove', 'worktree.keep'].map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Worktree of node" hint="The agent node whose worktree this acts on">
+          <select value={cfg.target ?? ''} disabled={readOnly} onChange={(e) => set({ target: e.target.value || undefined })}>
+            <option value="">choose…</option>
+            {owners.map((n) => (
+              <option key={n.id} value={n.id}>
+                {n.id}
+              </option>
+            ))}
+            {cfg.target && !owners.some((n) => n.id === cfg.target) && <option value={cfg.target}>{cfg.target}</option>}
+          </select>
+        </Field>
+      </div>
+      {op === 'diff' && (
+        <Field label="Base ref (optional)" hint="Defaults to HEAD of the worktree">
+          <input value={cfg.base ?? ''} disabled={readOnly} onChange={(e) => set({ base: e.target.value || undefined })} />
+        </Field>
+      )}
+      {op === 'commit' && (
+        <Field label="Commit message" hint="Template">
+          <TextArea value={cfg.message ?? ''} rows={3} mono={false} disabled={readOnly} onChange={(v) => set({ message: v })} />
+        </Field>
+      )}
+      {op === 'push' && (
+        <Field label="Remote">
+          <input value={cfg.remote ?? 'origin'} disabled={readOnly} onChange={(e) => set({ remote: e.target.value })} />
+        </Field>
+      )}
+      {op === 'pr.create' && (
+        <>
+          <Field label="Title" hint="Template">
+            <input value={cfg.title ?? ''} disabled={readOnly} onChange={(e) => set({ title: e.target.value })} />
+          </Field>
+          <Field label="Body" hint="Template, markdown">
+            <TextArea value={cfg.body ?? ''} rows={5} mono={false} disabled={readOnly} onChange={(v) => set({ body: v })} />
+          </Field>
+          <Field label="Base branch (optional)">
+            <input value={cfg.base ?? ''} disabled={readOnly} onChange={(e) => set({ base: e.target.value || undefined })} />
+          </Field>
+          <Field label="Draft">
+            <input type="checkbox" checked={cfg.draft ?? true} disabled={readOnly} onChange={(e) => set({ draft: e.target.checked })} />
+          </Field>
+        </>
+      )}
+      {op === 'worktree.remove' && (
+        <Field label="Delete branch too">
+          <input type="checkbox" checked={cfg.deleteBranch ?? true} disabled={readOnly} onChange={(e) => set({ deleteBranch: e.target.checked })} />
+        </Field>
+      )}
+    </>
+  );
+}
+
+function GateFields({ node, readOnly }: { node: NodeBase; readOnly: boolean }) {
+  const [cfg, set] = useConfig<{ title?: string; instructions?: string; show?: Array<{ label: string; expression: string; render: string }>; timeoutSec?: number; onTimeout?: string }>(node);
+  const show = cfg.show ?? [];
+  const update = (i: number, patch: Partial<{ label: string; expression: string; render: string }>) => set({ show: show.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
+  return (
+    <>
+      <Field label="Title" hint="Template">
+        <input value={cfg.title ?? ''} disabled={readOnly} onChange={(e) => set({ title: e.target.value })} />
+      </Field>
+      <Field label="Instructions" hint="Template, shown to the approver">
+        <TextArea value={cfg.instructions ?? ''} rows={2} mono={false} disabled={readOnly} onChange={(v) => set({ instructions: v })} />
+      </Field>
+      <div className="field-label">Items to show</div>
+      {show.map((s, i) => (
+        <div key={i} className="show-item">
+          <div className="field-row">
+            <Field label="Label">
+              <input value={s.label} disabled={readOnly} onChange={(e) => update(i, { label: e.target.value })} />
+            </Field>
+            <Field label="Render as">
+              <select value={s.render} disabled={readOnly} onChange={(e) => update(i, { render: e.target.value })}>
+                {['markdown', 'text', 'json', 'diff'].map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <Field label="Expression">
+            <TextArea value={s.expression} rows={2} disabled={readOnly} onChange={(v) => update(i, { expression: v })} />
+          </Field>
+          {!readOnly && (
+            <button className="link" onClick={() => set({ show: show.filter((_, j) => j !== i) })}>
+              remove
+            </button>
+          )}
+        </div>
+      ))}
+      {!readOnly && (
+        <button className="btn" onClick={() => set({ show: [...show, { label: 'Item', expression: 'nodes.previous.text', render: 'markdown' }] })}>
+          + add item
+        </button>
+      )}
+      <div className="field-row" style={{ marginTop: 10 }}>
+        <Field label="Timeout (s, optional)">
+          <input type="number" min={1} value={cfg.timeoutSec ?? ''} disabled={readOnly} onChange={(e) => set({ timeoutSec: e.target.value ? Number(e.target.value) : undefined })} />
+        </Field>
+        <Field label="On timeout">
+          <select value={cfg.onTimeout ?? 'reject'} disabled={readOnly} onChange={(e) => set({ onTimeout: e.target.value })}>
+            <option value="reject">reject</option>
+            <option value="approve">approve</option>
+          </select>
+        </Field>
+      </div>
+    </>
+  );
+}
+
+function NotifyFields({ node, readOnly }: { node: NodeBase; readOnly: boolean }) {
+  const [cfg, set] = useConfig<{ channel?: string; title?: string; message?: string; url?: string; level?: string }>(node);
+  return (
+    <>
+      <div className="field-row">
+        <Field label="Channel">
+          <select value={cfg.channel ?? 'desktop'} disabled={readOnly} onChange={(e) => set({ channel: e.target.value })}>
+            <option value="desktop">desktop (Orca UI)</option>
+            <option value="webhook">webhook (POST JSON)</option>
+          </select>
+        </Field>
+        <Field label="Level">
+          <select value={cfg.level ?? 'info'} disabled={readOnly} onChange={(e) => set({ level: e.target.value })}>
+            {['info', 'success', 'warning', 'error'].map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+      <Field label="Title" hint="Template">
+        <input value={cfg.title ?? ''} disabled={readOnly} onChange={(e) => set({ title: e.target.value })} />
+      </Field>
+      <Field label="Message" hint="Template">
+        <TextArea value={cfg.message ?? ''} rows={3} mono={false} disabled={readOnly} onChange={(v) => set({ message: v })} />
+      </Field>
+      {cfg.channel === 'webhook' && (
+        <Field label="URL">
+          <input value={cfg.url ?? ''} disabled={readOnly} onChange={(e) => set({ url: e.target.value || undefined })} />
+        </Field>
+      )}
+    </>
+  );
+}
+
+function ShellFields({ node, readOnly, document }: { node: NodeBase; readOnly: boolean; document: WorkflowDocument }) {
+  const [cfg, set] = useConfig<{ command?: string; shell?: string; cwdRelative?: string; timeoutMs?: number; failOnNonZero?: boolean; worktreeOf?: string }>(node);
   return (
     <>
       <Field label="Command" hint="Template. Runs in the repo directory.">
         <TextArea value={cfg.command ?? ''} rows={3} disabled={readOnly} onChange={(v) => set({ command: v })} />
       </Field>
+      <WorktreeOfField value={cfg.worktreeOf} document={document} exclude={node.id} readOnly={readOnly} onChange={(v) => set({ worktreeOf: v })} />
       <div className="field-row">
         <Field label="Shell">
           <select value={cfg.shell ?? 'auto'} disabled={readOnly} onChange={(e) => set({ shell: e.target.value })}>

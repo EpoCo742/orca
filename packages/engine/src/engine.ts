@@ -7,6 +7,7 @@ import { Hono } from 'hono';
 import { openDatabase, type Database } from './db/database.js';
 import { RunStore } from './run/store.js';
 import { ApprovalBroker } from './approvals/broker.js';
+import { WorktreeManager } from './run/worktrees.js';
 import { ExpressionSandbox } from './expr/sandbox.js';
 import { WorkflowStore } from './workflows/store.js';
 import { RunManager } from './run/manager.js';
@@ -71,10 +72,12 @@ export async function createEngine(config: EngineConfig): Promise<Engine> {
   const adapters: Partial<Record<AdapterId, AgentAdapter>> = { fake: new FakeAdapter() };
   if (!config.disableCopilot) adapters.copilot = new CopilotAdapter(() => getCopilotClient({ workingDirectory: config.workingDirectory }), logger);
 
+  const worktrees = new WorktreeManager(db, logger);
   const services: EngineServices = {
     store,
     sandbox,
     approvals,
+    worktrees,
     adapters,
     logger,
     agentSlots: { max: config.maxConcurrentAgentsGlobal ?? 8, used: 0 },

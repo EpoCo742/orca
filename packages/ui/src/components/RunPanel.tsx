@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { nodeKey, parseNodeKey, type RunProjection, type TranscriptRow, type WorkflowDocument } from '@orca/shared';
 import type { Api } from '../api.js';
 import { useRuns } from '../store/runs.js';
+import { DiffView } from './Render.js';
 
 export function RunPanel({ api, runId, run, workflow, nodeId }: { api: Api; runId: string; run: RunProjection; workflow: WorkflowDocument; nodeId?: string }) {
   const runs = useRuns();
@@ -19,7 +20,9 @@ export function RunPanel({ api, runId, run, workflow, nodeId }: { api: Api; runI
   const key = current ? `${runId}:${nodeKey(current.nodeId, current.scope)}` : undefined;
   const transcript = key ? runs.transcripts[key] : undefined;
   const log = key ? runs.logs[key] : undefined;
-  const [tab, setTab] = useState<'overview' | 'transcript' | 'output'>('overview');
+  const [tab, setTab] = useState<'overview' | 'transcript' | 'output' | 'diff'>('overview');
+  const cfg = (node?.config ?? {}) as { isolation?: string; worktreeOf?: string; target?: string };
+  const worktreeOwner = cfg.worktreeOf ?? (node?.type === 'action.git' ? cfg.target : undefined) ?? (node?.type === 'agent.copilot' && cfg.isolation === 'worktree' ? node.id : undefined);
 
   useEffect(() => {
     if (!current || node?.type !== 'agent.copilot') return;
@@ -73,7 +76,13 @@ export function RunPanel({ api, runId, run, workflow, nodeId }: { api: Api; runI
                 Output
               </button>
             )}
+            {worktreeOwner && (
+              <button className={tab === 'diff' ? 'active' : ''} onClick={() => setTab('diff')}>
+                Diff
+              </button>
+            )}
           </div>
+          {tab === 'diff' && worktreeOwner && <WorktreeDiff api={api} runId={runId} owner={worktreeOwner} />}
           {tab === 'overview' && (
             <div className="outputs">
               {current.outputs ? (
@@ -112,6 +121,70 @@ export function RunPanel({ api, runId, run, workflow, nodeId }: { api: Api; runI
           )}
         </>
       )}
+    </div>
+  );
+}
+
+function WorktreeDiff({ api, runId, owner }: { api: Api; runId: string; owner: string }) {
+  const [state, setState] = useState<{ status: 'loading' } | { status: 'error'; error: string } | { status: 'ok'; data: Awaited<ReturnType<Api['worktreeDiff']>> }>({ status: 'loading' });
+  const [busy, setBusy] = useState(false);
+  const load = () => {
+    setState({ status: 'loading' });
+    api
+      .worktreeDiff(runId, owner)
+      .then((data) => setState({ status: 'ok', data }))
+      .catch((e: Error) => setState({ status: 'error', error: e.message }));
+  };
+  useEffect(load, [runId, owner]);
+  if (state.status === 'loading') return <div className="note">loading diff…</div>;
+  if (state.status === 'error') return <div className="note">{state.error} (the worktree may have been removed)</div>;
+  const { worktree, patch, stats, files } = state.data;
+  return (
+    <div>
+      <div className="note">
+        branch <code>{worktree.branch}</code> · {stats.files} files, +{stats.insertions} -{stats.deletions} · {worktree.status}
+      </div>
+      <div className="note small mono">{worktree.path}</div>
+      <div className="wt-actions">
+        <button className="btn" onClick={load}>
+          refresh
+        </button>
+        <button
+          className="btn"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            await api.worktreeKeep(runId, owner).catch(() => undefined);
+            setBusy(false);
+            load();
+          }}
+        >
+          keep worktree
+        </button>
+        <button
+          className="btn btn-danger"
+          disabled={busy}
+          onClick={async () => {
+            if (!window.confirm(`Discard the worktree and branch ${worktree.branch}?`)) return;
+            setBusy(true);
+            await api.worktreeRemove(runId, owner).catch(() => undefined);
+            setBusy(false);
+            load();
+          }}
+        >
+          discard
+        </button>
+      </div>
+      {files.length > 0 && (
+        <ul className="list">
+          {files.map((f) => (
+            <li key={f}>
+              <code>{f}</code>
+            </li>
+          ))}
+        </ul>
+      )}
+      <DiffView patch={patch} />
     </div>
   );
 }

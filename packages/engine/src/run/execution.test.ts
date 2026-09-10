@@ -11,6 +11,7 @@ import { FakeAdapter } from '../adapters/fake.js';
 import { createLogger } from '../logger.js';
 import { WorkflowStore } from '../workflows/store.js';
 import { RunManager } from './manager.js';
+import { WorktreeManager } from './worktrees.js';
 import { defaultExecutors } from './executors/index.js';
 import type { EngineServices } from './context.js';
 
@@ -21,7 +22,8 @@ function harness(dbPath = ':memory:') {
   const db: Database = openDatabase(dbPath);
   const store = new RunStore(db);
   const approvals = new ApprovalBroker(store);
-  const services: EngineServices = { store, sandbox, approvals, adapters: { fake: new FakeAdapter() }, logger: createLogger('silent'), agentSlots: { max: 8, used: 0 } };
+  const logger = createLogger('silent');
+  const services: EngineServices = { store, sandbox, approvals, worktrees: new WorktreeManager(db, logger), adapters: { fake: new FakeAdapter() }, logger, agentSlots: { max: 8, used: 0 } };
   const workflows = new WorkflowStore(db);
   const runs = new RunManager(services, defaultExecutors(), workflows);
   return { db, store, approvals, services, workflows, runs };

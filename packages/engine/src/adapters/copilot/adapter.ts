@@ -1,4 +1,4 @@
-import type { CopilotClient, PermissionHandler, PermissionRequest, SessionEvent, SessionHooks } from '@github/copilot-sdk';
+import type { CopilotClient, PermissionHandler, PermissionRequest, SessionEvent, SessionHooks, Tool } from '@github/copilot-sdk';
 import type { Logger } from '../../logger.js';
 import { hardDenyReason, type PermissionQuery } from '../permissions.js';
 import type { AdapterHooks, AgentAdapter, AgentResult, AgentResultSubtype, AgentRunSpec } from '../types.js';
@@ -35,7 +35,33 @@ export class CopilotAdapter implements AgentAdapter {
       return { kind: 'reject', feedback: d.reason };
     };
 
+    let structured: unknown = undefined;
+    let nudged = false;
+    const tools: Tool<unknown>[] = spec.outputSchema
+      ? [
+          {
+            name: 'submit_result',
+            description: 'Submit your final structured result. Call this exactly once when you are done; it ends the task.',
+            parameters: spec.outputSchema,
+            skipPermission: true,
+            handler: async (args) => {
+              structured = args;
+              hooks.onEvent('orca.result', args, 'submit_result received');
+              return 'Result recorded. You can stop now.';
+            },
+          },
+        ]
+      : [];
+
     const sessionHooks: SessionHooks = {
+      onAgentStop: () => {
+        if (spec.outputSchema && structured === undefined && !nudged) {
+          nudged = true;
+          hooks.onEvent('orca.nudge', {}, 'asked the agent to call submit_result');
+          return { decision: 'block', reason: 'You have not called the submit_result tool yet. Call submit_result now with your final structured result, then stop.' };
+        }
+        return undefined;
+      },
       onPreToolUse: (input) => {
         const args = input.toolArgs as { command?: string } | undefined;
         const query: PermissionQuery = isShellTool(input.toolName)
@@ -67,6 +93,7 @@ export class CopilotAdapter implements AgentAdapter {
           : { mode: 'replace', content: spec.system.text },
       onPermissionRequest,
       hooks: sessionHooks,
+      tools,
       infiniteSessions: { enabled: true },
       enableFileChangeTracking: true,
     });
@@ -120,7 +147,7 @@ export class CopilotAdapter implements AgentAdapter {
     signal.addEventListener('abort', onAbort, { once: true });
 
     try {
-      const final = await session.sendAndWait({ prompt: spec.prompt }, spec.timeoutMs + 10_000);
+      const final = await session.sendAndWait({ prompt: spec.prompt, agentMode: spec.agentMode === 'interactive' ? undefined : spec.agentMode }, spec.timeoutMs + 10_000);
       text = (final?.data as { content?: string } | undefined)?.content ?? lastAssistant;
     } catch (err) {
       if (!stopReason) {
@@ -138,6 +165,7 @@ export class CopilotAdapter implements AgentAdapter {
     return {
       subtype: stopReason ?? 'success',
       text,
+      structured,
       sessionId: session.sessionId,
       cost: { unit: 'premium_requests', amount: premiumRequests },
       numTurns: modelCalls,
