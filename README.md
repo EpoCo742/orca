@@ -22,6 +22,7 @@ pnpm orca run fix-until-green --approve-all   # headless run of a bundled templa
 | `docs/02-architecture.md` | Engineers, owner | Components, workflow model, execution model, agent node, permissions, isolation, deployment, technology choices |
 | `docs/03-technical-spec.md` | The AI engineer building it | Build-ready spec: schemas, node catalog, engine algorithms, storage, API, UI, adapter contracts (Copilot SDK, Claude Agent SDK), tests, verification checklist |
 | `docs/04-build-plan.md` | Owner and builder | Agreed decisions, environment facts, owner actions, milestones M0 to M5 with acceptance criteria |
+| `docs/guide/README.md` | Developers using Orca | User guide with screenshots: setup, UI tour, six progressive use cases, node and expression reference, troubleshooting |
 
 ## Stack (decided)
 

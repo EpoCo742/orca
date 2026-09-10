@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "id": "e5f6a7b8-c9d0-4e1f-8a2b-3c4d5e6f7a09",
+  "name": "Open PRs report",
+  "description": "Calls the GitHub MCP server directly (no model) to list open pull requests, then notifies.",
+  "inputs": [
+    {
+      "name": "owner",
+      "type": "string",
+      "default": "EpoCo742",
+      "description": "Repository owner"
+    },
+    {
+      "name": "repo",
+      "type": "string",
+      "default": "orca-sample-target",
+      "description": "Repository name"
+    }
+  ],
+  "settings": {
+    "mcpServers": {
+      "github": {
+        "type": "http",
+        "url": "https://api.githubcopilot.com/mcp/",
+        "headers": {
+          "Authorization": "Bearer ${SECRET:GITHUB_TOKEN}"
+        }
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "trigger.manual",
+      "position": {
+        "x": 40,
+        "y": 160
+      },
+      "config": {
+        "inputsForm": [
+          "owner",
+          "repo"
+        ]
+      }
+    },
+    {
+      "id": "prs",
+      "type": "action.mcp_tool",
+      "position": {
+        "x": 280,
+        "y": 160
+      },
+      "config": {
+        "server": "github",
+        "tool": "list_pull_requests",
+        "args": {
+          "owner": "{{ inputs.owner }}",
+          "repo": "{{ inputs.repo }}",
+          "state": "open"
+        }
+      }
+    },
+    {
+      "id": "count",
+      "type": "data.transform",
+      "position": {
+        "x": 540,
+        "y": 160
+      },
+      "config": {
+        "code": "const list = Array.isArray(ctx.nodes.prs.result) ? ctx.nodes.prs.result : []; return { count: list.length, titles: list.map(p => '#' + p.number + ' ' + p.title) }"
+      }
+    },
+    {
+      "id": "done",
+      "type": "action.notify",
+      "position": {
+        "x": 800,
+        "y": 160
+      },
+      "config": {
+        "title": "Open PRs: {{ nodes.count.value.count }}",
+        "message": "{{ orca.json(nodes.count.value.titles) }}",
+        "level": "info"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": {
+        "node": "start",
+        "port": "done"
+      },
+      "to": {
+        "node": "prs",
+        "port": "trigger"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "prs",
+        "port": "done"
+      },
+      "to": {
+        "node": "count",
+        "port": "trigger"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "count",
+        "port": "done"
+      },
+      "to": {
+        "node": "done",
+        "port": "trigger"
+      }
+    }
+  ],
+  "ui": {}
+}
