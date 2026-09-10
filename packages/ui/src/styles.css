@@ -204,3 +204,5 @@ details.adv summary { cursor: pointer; color: var(--muted); }
 .toast b { display: block; }
 .wt-actions { display: flex; gap: 6px; margin: 6px 0; }
 .show-item { border: 1px solid var(--border); border-radius: 6px; padding: 6px; margin-bottom: 6px; }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 60; }
+.modal { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; width: 560px; max-width: 90vw; max-height: 80vh; overflow: auto; }

@@ -174,8 +174,10 @@ export function compileWorkflow(doc: WorkflowDocument): CompileResult {
   // policy checks
   for (const pn of nodes.values()) {
     if (pn.def.type === 'agent.copilot') {
-      const cfg = pn.config as { isolation: string; allowedTools: string[] };
-      if (cfg.isolation === 'none' && cfg.allowedTools.includes('Write')) warn('writer_not_isolated', `${pn.node.id}: agent can write files but is not isolated in a worktree`, { nodeId: pn.node.id });
+      const cfg = pn.config as { isolation: string; allowedTools: string[]; worktreeOf?: string; disallowedTools: string[] };
+      const canWrite = cfg.allowedTools.includes('Write') && !cfg.disallowedTools.includes('Write');
+      if (cfg.isolation === 'none' && !cfg.worktreeOf && canWrite) warn('writer_not_isolated', `${pn.node.id}: agent can write files but is not isolated in a worktree`, { nodeId: pn.node.id });
+      if (cfg.worktreeOf && !nodes.get(cfg.worktreeOf)) error('unknown_worktree_owner', `${pn.node.id}: worktreeOf references unknown node "${cfg.worktreeOf}"`, { nodeId: pn.node.id });
     }
     if (!pn.parent && pn.def.category !== 'trigger' && !(edgesByTarget.get(pn.node.id)?.length)) {
       warn('orphan_node', `${pn.node.id}: has no incoming edges and will run at start`, { nodeId: pn.node.id });

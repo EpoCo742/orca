@@ -77,7 +77,9 @@ Deliverables
 - Template `issue-to-pr.workflow.json`.
 
 Acceptance
-- Issue-to-PR runs against `examples/sample-target` on a branch: planner (read-only) -> gate shows plan -> implementer in worktree -> tests in that worktree -> loop (max 3) -> judge -> gate shows diff and findings -> commit -> draft PR created with `gh`. Rejecting at the diff gate removes the worktree and branch.
+- Issue-to-PR runs against a standalone sample repo on a branch: planner (read-only) -> gate shows plan -> implementer in worktree -> tests in that worktree -> loop (max 3) -> judge -> gate shows diff and findings -> commit -> draft PR created with `gh`. Rejecting at the diff gate removes the worktree and branch. **Met 2026-09-10**: full run from the UI on `EpoCo742/orca-sample-target`, draft PR #1, 10 premium requests, ~2 minutes; rejection path verified by the engine test (`worktrees.test.ts`). See `docs/demos/m2.md` and ADR 0003.
+
+Changes from the plan: the target is a standalone repo created by `orca sample init` (worktrees of the monorepo would not have had `node_modules`); PR creation uses `gh` rather than the GitHub MCP server; the `maxPremiumRequests` unit test carried from M1 is still open.
 
 ### M3 Scale-out and integrations (target: 1.5 weeks)
 

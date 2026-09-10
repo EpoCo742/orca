@@ -8,6 +8,7 @@ import { Palette } from './components/Palette.js';
 import { Inspector } from './components/Inspector.js';
 import { RunPanel } from './components/RunPanel.js';
 import { ApprovalsPanel } from './components/Approvals.js';
+import { RunInputsDialog } from './components/RunInputsDialog.js';
 
 type Mode = 'edit' | 'run';
 
@@ -37,6 +38,7 @@ function Shell({ api }: { api: Api }) {
   const [mode, setMode] = useState<Mode>('edit');
   const [error, setError] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
+  const [inputsDialog, setInputsDialog] = useState(false);
   const socket = useRef<EngineSocket | undefined>(undefined);
 
   const refreshWorkflows = useCallback(() => api.workflows().then(setWorkflows).catch((e: Error) => setError(e.message)), [api]);
@@ -151,12 +153,17 @@ function Shell({ api }: { api: Api }) {
       setError('Fix the errors in the Problems panel before running.');
       return;
     }
-    const inputs: Record<string, unknown> = {};
-    for (const inp of doc.inputs) {
-      const v = window.prompt(`Input "${inp.name}" (${inp.type})${inp.description ? `: ${inp.description}` : ''}`, inp.default !== undefined ? String(inp.default) : '');
-      if (v === null) return;
-      inputs[inp.name] = inp.type === 'number' ? Number(v) : inp.type === 'boolean' ? v === 'true' : inp.type === 'json' ? safeJson(v) : v;
+    if (doc.inputs.length > 0) {
+      setInputsDialog(true);
+      return;
     }
+    await launch({});
+  };
+
+  const launch = async (inputs: Record<string, unknown>) => {
+    const doc = editor.document;
+    if (!doc) return;
+    setInputsDialog(false);
     try {
       const { runId } = await api.startRun(doc.id, inputs);
       await openRun(runId);
@@ -230,6 +237,7 @@ function Shell({ api }: { api: Api }) {
           {error} <span className="note">(click to dismiss)</span>
         </div>
       )}
+      {inputsDialog && editor.document && <RunInputsDialog inputs={editor.document.inputs} onSubmit={launch} onCancel={() => setInputsDialog(false)} />}
       <ApprovalsPanel api={api} approvals={runs.approvals} onOpenRun={openRun} />
       <div className="toasts">
         {runs.notifications.slice(-4).map((n) => (
@@ -304,12 +312,4 @@ function Shell({ api }: { api: Api }) {
 function isTyping(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null;
   return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
-}
-
-function safeJson(v: string): unknown {
-  try {
-    return JSON.parse(v);
-  } catch {
-    return v;
-  }
 }
