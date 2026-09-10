@@ -26,8 +26,8 @@ Status: Agreed with the owner. Supersedes the milestone list in `03-technical-sp
 
 | When | Action | Why |
 |---|---|---|
-| During M0 | Run the Copilot login when I ask (I will give the exact command, likely `! pnpm orca auth login`, which runs the bundled CLI's device-code flow) | Establishes the OAuth token the SDK reuses |
-| During M0 | Confirm with your org admin that **Copilot CLI** is enabled by policy, and which models are allowed | The SDK runs the CLI; policy denial shows up as auth or model errors |
+| M0 (done 2026-09-10) | Copilot login via `pnpm orca auth login` (browser OAuth + GitHub Mobile sudo confirmation) | Establishes the OAuth token the SDK reuses; signed in as EpoCo742 |
+| M0 (done) | Copilot CLI policy: confirmed working; 15 models allowed incl. `claude-sonnet-5` and `claude-haiku-4.5`, **no Claude Opus** | Default agent model for the Copilot adapter is `claude-sonnet-5` |
 | M2 | Provide a GitHub fine-grained PAT (or approve using the `gh` OAuth token) for the GitHub MCP server and `gh pr create` | Issue-to-PR template |
 | M3, optional | Atlassian site URL if you want the Jira preset exercised | Atlassian preset |
 | M4, optional | `ANTHROPIC_API_KEY` if you want the Claude Agent SDK adapter built and tested | Otherwise that adapter stays stubbed |
@@ -47,8 +47,8 @@ Deliverables
 - ADRs 0001 (naming and stack), 0002 (Copilot SDK contract as observed).
 
 Acceptance
-- `pnpm -r build && pnpm -r test && pnpm -r typecheck` green on Windows.
-- Spike prints the model list and a completed assistant message using the owner's Copilot seat.
+- `pnpm -r build && pnpm -r test && pnpm -r typecheck` green on Windows. **Met 2026-09-10.**
+- Spike prints the model list and a completed assistant message using the owner's Copilot seat. **Met 2026-09-10** (claude-sonnet-5, one shell tool call with permission prompt, 2 premium requests, 4.6 s). Observations recorded in ADR 0002.
 
 ### M1 Vertical slice: "fix until green" (target: 1.5 to 2 weeks)
 
