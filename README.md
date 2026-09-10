@@ -2,7 +2,7 @@
 
 Visual orchestration for coding agents. Draw a development workflow on a canvas, where each node is a full coding agent (files, shell, git, MCP) or a deterministic step (tests, conditions, loops, approval gates), and run it with durable, reviewable runs. Workflow definitions live in the repository as JSON.
 
-Status: M0 (scaffold, Copilot spike), M1 (vertical slice: canvas, engine, Copilot agent node, approvals, crash-resume), and M2 (worktree isolation, Git node, approval gates, judge results, diff viewer, Issue-to-PR template) are done. Next is M3: Map/Join fan-out, MCP presets, secrets, sub-workflows. See `docs/04-build-plan.md` and `docs/demos/`.
+Status: M0 through M3 are done: canvas and engine, Copilot agent node with approvals and crash-resume, worktree isolation with Git nodes and gates, Map/Join fan-out with per-item worktrees, sub-workflows, MCP tool node and presets, encrypted secrets with redaction. Templates: fix-until-green, issue-to-pr, parallel-review, tournament. Next is M4: replay-from-node, schedule triggers, CLI hardening, optional Claude adapter. See `docs/04-build-plan.md` and `docs/demos/`.
 
 ## Quick start
 

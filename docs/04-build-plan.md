@@ -91,7 +91,9 @@ Deliverables
 - Templates `parallel-review`, `tournament`, `migration-fanout`.
 
 Acceptance
-- Parallel review runs one judge per changed file with concurrency 4 and merges findings; no secret value appears in any log, event, or transcript (automated check).
+- Parallel review runs one judge per changed file with concurrency 4 and merges findings; no secret value appears in any log, event, or transcript (automated check). **Met 2026-09-10**: parallel-review template from the UI (2 files concurrently, merged verdict, 11 premium requests); tournament template (3 contestants in per-item worktrees, judge picked a winner, losers discarded); MCP tool node listed PRs via the GitHub MCP server with a stored token; redaction verified by an engine test and by grepping the live run's events. See `docs/demos/m3.md`, ADR 0004.
+
+Changes from the plan: Atlassian preset defined but not exercised (no Jira site); `migration-fanout` template deferred (tournament covers per-item worktrees); the M1 `maxPremiumRequests` gap is closed by `BudgetTracker` unit tests, though the Copilot adapter still uses its inline counters (swap in M4).
 
 ### M4 Hardening, CLI, optional Claude adapter (target: 1 week)
 
