@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+.turbo/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+.orca/worktrees/
+.orca/runs/
+*.db
+*.db-journal
+.DS_Store
+Thumbs.db
+.vite/
+out/
