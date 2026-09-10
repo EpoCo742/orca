@@ -8,10 +8,10 @@
   "nodes": [
     { "id": "start", "type": "trigger.manual", "position": { "x": 40, "y": 200 }, "config": {} },
     { "id": "reset", "type": "action.shell", "position": { "x": 260, "y": 200 }, "config": { "command": "git checkout -- src/math.js" } },
-    { "id": "loop", "type": "control.loop", "position": { "x": 480, "y": 80 }, "size": { "w": 760, "h": 320 }, "config": { "until": "nodes.test.exit_code === 0", "maxIterations": 5 } },
-    { "id": "test", "type": "action.shell", "position": { "x": 520, "y": 160 }, "parent": "loop", "config": { "command": "npx vitest run" } },
-    { "id": "failing", "type": "control.condition", "position": { "x": 760, "y": 160 }, "parent": "loop", "config": { "expression": "nodes.test.exit_code !== 0" } },
-    { "id": "fix", "type": "agent.copilot", "position": { "x": 1000, "y": 160 }, "parent": "loop", "config": {
+    { "id": "loop", "type": "control.loop", "position": { "x": 480, "y": 60 }, "size": { "w": 820, "h": 300 }, "config": { "until": "nodes.test.exit_code === 0", "maxIterations": 5 } },
+    { "id": "test", "type": "action.shell", "position": { "x": 30, "y": 90 }, "parent": "loop", "config": { "command": "npx vitest run" } },
+    { "id": "failing", "type": "control.condition", "position": { "x": 300, "y": 90 }, "parent": "loop", "config": { "expression": "nodes.test.exit_code !== 0" } },
+    { "id": "fix", "type": "agent.copilot", "position": { "x": 560, "y": 90 }, "parent": "loop", "config": {
       "adapter": "copilot",
       "prompt": "You are fixing a small Node.js project. Iteration {{ iteration.index + 1 }} of a fix loop.\n\nThe test suite failed with this output:\n\n```\n{{ orca.tail(nodes.test.stdout, 60) }}\n{{ orca.tail(nodes.test.stderr, 20) }}\n```\n\nFix the implementation in src/math.js so that every test in test/math.test.js passes. Do not modify the tests. Do not add dependencies. Keep changes minimal. When done, reply with one line summarizing what you changed.",
       "allowedTools": ["Read", "Write", "Shell(npx vitest*)", "Shell(npm test*)", "Shell(node *)", "Shell(git diff*)", "Shell(git status*)", "Shell(Get-ChildItem*)", "Shell(Get-Content*)", "Shell(ls*)", "Shell(cat*)"],
@@ -20,8 +20,8 @@
       "maxToolCalls": 60,
       "timeoutMs": 600000
     } },
-    { "id": "verdict", "type": "control.condition", "position": { "x": 1300, "y": 200 }, "config": { "expression": "nodes.loop.last.test.exit_code === 0" } },
-    { "id": "summary", "type": "data.transform", "position": { "x": 1540, "y": 200 }, "config": { "code": "return { green: nodes.verdict.value, iterations: nodes.loop.iterations, exitedBy: nodes.loop.exited_by, lastFix: nodes.loop.last.fix ? nodes.loop.last.fix.text : null }" } }
+    { "id": "verdict", "type": "control.condition", "position": { "x": 1360, "y": 200 }, "config": { "expression": "nodes.loop.last.test.exit_code === 0" } },
+    { "id": "summary", "type": "data.transform", "position": { "x": 1620, "y": 200 }, "config": { "code": "return { green: nodes.verdict.value, iterations: nodes.loop.iterations, exitedBy: nodes.loop.exited_by, lastFix: nodes.loop.last.fix ? nodes.loop.last.fix.text : null }" } }
   ],
   "edges": [
     { "id": "e1", "from": { "node": "start", "port": "done" }, "to": { "node": "reset", "port": "trigger" } },
