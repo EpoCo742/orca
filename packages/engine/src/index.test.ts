@@ -14,6 +14,9 @@ describe('engine api', () => {
   });
   afterAll(async () => {
     engine.db.close();
+    // The fake fix loop edits the sample target; restore its intentional bug so it never gets committed fixed.
+    const { execa } = await import('execa');
+    await execa('git', ['checkout', '--', 'src/math.js'], { cwd: path.resolve(templatesDir, '..', 'examples', 'sample-target'), reject: false });
   });
 
   it('rejects requests without the bearer token', async () => {

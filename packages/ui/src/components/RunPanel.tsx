@@ -14,7 +14,7 @@ export function RunPanel({ api, runId, run, workflow, nodeId }: { api: Api; runI
   const current = states.find((s) => s.scope === scope) ?? states[states.length - 1];
   useEffect(() => {
     if (current) setScope(current.scope);
-  }, [nodeId, states.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [nodeId, states.length]);
 
   const key = current ? `${runId}:${nodeKey(current.nodeId, current.scope)}` : undefined;
   const transcript = key ? runs.transcripts[key] : undefined;
@@ -25,11 +25,11 @@ export function RunPanel({ api, runId, run, workflow, nodeId }: { api: Api; runI
     if (!current || node?.type !== 'agent.copilot') return;
     if (key && runs.transcripts[key]) return;
     api.transcript(runId, current.nodeId, current.scope).then((rows) => runs.setTranscript(runId, current.nodeId, current.scope, rows)).catch(() => undefined);
-  }, [runId, current?.nodeId, current?.scope]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [runId, current?.nodeId, current?.scope]);
 
   useEffect(() => {
     if (selectedKey && nodeId !== parseNodeKey(selectedKey).nodeId) runs.selectNode(undefined);
-  }, [nodeId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [nodeId]);
 
   if (!node) return <RunOverview run={run} workflow={workflow} />;
 

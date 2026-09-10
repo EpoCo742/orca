@@ -2,7 +2,16 @@
 
 Visual orchestration for coding agents. Draw a development workflow on a canvas, where each node is a full coding agent (files, shell, git, MCP) or a deterministic step (tests, conditions, loops, approval gates), and run it with durable, reviewable runs. Workflow definitions live in the repository as JSON.
 
-Status: research and specification complete; build starting with milestone M0 (see `docs/04-build-plan.md`).
+Status: M0 (scaffold, Copilot spike) and M1 (vertical slice: canvas, engine, Copilot agent node, approvals, crash-resume) are done. Next is M2: worktree isolation, Git node, diff viewer, approval gates. See `docs/04-build-plan.md` and `docs/demos/`.
+
+## Quick start
+
+```powershell
+pnpm install
+pnpm orca auth login          # GitHub Copilot sign-in (browser + 2FA)
+pnpm dev                      # engine + UI; opens the browser
+pnpm orca run fix-until-green --approve-all   # headless run of a bundled template
+```
 
 ## Documents
 

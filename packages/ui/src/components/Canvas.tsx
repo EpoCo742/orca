@@ -48,6 +48,7 @@ function CanvasInner({ document, diagnostics, run, readOnly, selectedNodeId, onS
   const onNodesChange = useCallback(
     (changes: NodeChange<OrcaRFNode>[]) => {
       setNodes((ns) => applyNodeChanges(changes, ns));
+      for (const ch of changes) if (ch.type === 'select' && ch.selected) onSelectNode(ch.id, undefined);
       if (readOnly) return;
       for (const ch of changes) {
         if (ch.type === 'position' && ch.dragging) dragging.current = true;
@@ -70,7 +71,6 @@ function CanvasInner({ document, diagnostics, run, readOnly, selectedNodeId, onS
           }
         }
         if (ch.type === 'remove') editor.removeNodes([ch.id]);
-        if (ch.type === 'select' && ch.selected) onSelectNode(ch.id, undefined);
       }
     },
     [editor, readOnly, onSelectNode, document.nodes],
@@ -79,10 +79,10 @@ function CanvasInner({ document, diagnostics, run, readOnly, selectedNodeId, onS
   const onEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
       setEdges((es) => applyEdgeChanges(changes, es));
+      for (const ch of changes) if (ch.type === 'select' && ch.selected) onSelectNode(undefined, ch.id);
       if (readOnly) return;
       const removed = changes.filter((c) => c.type === 'remove').map((c) => c.id);
       if (removed.length) editor.removeEdges(removed);
-      for (const ch of changes) if (ch.type === 'select' && ch.selected) onSelectNode(undefined, ch.id);
     },
     [editor, readOnly, onSelectNode],
   );

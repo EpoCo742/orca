@@ -58,7 +58,7 @@ function Shell({ api }: { api: Api }) {
       off();
       s.close();
     };
-  }, [api]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [api]);
 
   // keyboard shortcuts
   useEffect(() => {
@@ -138,7 +138,7 @@ function Shell({ api }: { api: Api }) {
         setError((e as Error).message);
       }
     },
-    [api, runs, workflows, editor.document], // eslint-disable-line react-hooks/exhaustive-deps
+    [api, runs, workflows, editor.document],
   );
 
   const startRun = async () => {
@@ -182,7 +182,7 @@ function Shell({ api }: { api: Api }) {
   // keep the sidebar run list in sync with the active run's status and cost
   useEffect(() => {
     if (editor.document) void refreshRuns(editor.document.id);
-  }, [activeRun?.status, activeRun?.cost.premiumRequests]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeRun?.status, activeRun?.cost.premiumRequests]);
   const doc = mode === 'run' && activeWorkflow ? activeWorkflow : editor.document;
 
   return (

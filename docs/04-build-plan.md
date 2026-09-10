@@ -60,10 +60,12 @@ Deliverables
 - Crash-resume: engine restart re-dispatches in-flight nodes, memoized nodes not re-run.
 
 Acceptance
-- From the UI: open the template, run it, watch the Shell node fail, the Copilot agent edit the sample repo, the Shell node pass, the Loop exit with `exited_by: until`. Total iterations shown.
-- A shell command outside the allow list produces an approval prompt in the UI; Deny is honored and visible in the transcript.
-- Kill the engine mid-run, restart, run resumes and completes.
-- Contract tests with `FakeAdapter` cover success, max-turn cap, denied tool, adapter crash.
+- From the UI: open the template, run it, watch the Shell node fail, the Copilot agent edit the sample repo, the Shell node pass, the Loop exit with `exited_by: until`. Total iterations shown. **Met 2026-09-10** (real Copilot run from the UI: 12 s, 4 premium requests, 2 iterations; see `docs/demos/m1.md`).
+- A shell command outside the allow list produces an approval prompt in the UI; Deny is honored and visible in the transcript. **Met** (approval card over WebSocket; allow/deny/allow-for-run; decision recorded on the run and in the transcript as `orca.permission`).
+- Kill the engine mid-run, restart, run resumes and completes. **Met** (engine killed with a fake agent in flight; on restart the run resumed, upstream nodes memoized, agent re-dispatched as attempt 2, run completed).
+- Contract tests with `FakeAdapter` cover success, max-turn cap, denied tool, adapter crash. **Met in part**: 30 engine tests cover success, denied tool, adapter crash, retries, cancellation, resume; the max-turn cap is exercised only by the Copilot adapter's counters and has no unit test yet (carried to M2).
+
+Deferred from M1 (tracked for M2): CodeMirror prompt editor with `{{ }}` completion (a textarea plus a copyable reference list shipped instead); Playwright smoke test; `maxPremiumRequests` unit test; node context menu; edge labels for data ports are text only.
 
 ### M2 Isolation and review: "issue to PR" (target: 1.5 weeks)
 
