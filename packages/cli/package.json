@@ -1,0 +1,27 @@
+{
+  "name": "@orca/cli",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "orca": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@github/copilot": "^1.0.83",
+    "@orca/engine": "workspace:*",
+    "@orca/shared": "workspace:*",
+    "commander": "^15.0.0",
+    "execa": "^10.0.1",
+    "open": "^11.0.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  }
+}
